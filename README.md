@@ -29,7 +29,7 @@ make -C sim SIM=xsim     # same tests under Vivado xsim
 make -C sim lint         # xvlog/xelab elaboration gate (both CSR_EN variants)
 ```
 
-Milestone status: **M1 (skeleton)** — see `docs/integration_guide.md` roadmap section.
+Milestone status: **M2 (single-port datapath)** — see `docs/integration_guide.md` roadmap section.
 
 ## Toolchain
 

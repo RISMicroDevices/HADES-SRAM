@@ -61,7 +61,7 @@ VU9P = 3 SLRs; all IP logic + MIG C0 constrained to SLR2 pblock; per-port local 
 | Milestone | Content | Tests |
 |---|---|---|
 | M1 (done) | Skeleton: pkg/CDC/freq-mon/CSR, empty datapath, CSR_EN variants | T6-basic, static smoke, bounds |
-| M2 | Single-port datapath, mig_if, timing shaper, AXI4 model | T1, T2(L=2), T13a |
+| M2 (done) | Full per-port datapath: hades_port (CDC: Gray-FIFO + quasi-static slots), timing shaper (L=1/2, back-to-back), mig_if (FCFS AXI4 engine, 32-deep outstanding, sub-word lanes, stats + illegal/SLVERR/drop errors), AXI4 MIG model with refresh/periodic-read/ZQCS occupancy | T1 (1e5 ops), T2 (L=1/2 exact), T13a-lite — SYNC+ASYNC, CSR+static, VCS+xsim |
 | M3 | Refresh/ZQCS scheduling, determinism guards | T2(L=1), T3, T11, T14 |
 | M4 | TDMA arbiter, N=8→32→64, backdoor | T4, T5, T7, T9, T11 |
 | M5 | Hardening, coverage, VCU1525 acceptance, IP package | T8–T13, A1–A10 |

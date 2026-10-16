@@ -23,9 +23,18 @@ package hades_pkg;
   // ------------------------------------------------------------------
   localparam int WORD_BYTES  = 64;                      // one 512-bit AXI beat
   localparam int BASE_W      = 34;                      // 512-bit-word address (1 TiB span)
+  localparam int AXI_ADDR_W  = 40;                      // byte address on m_axi (beat<<6)
   localparam int PORT_MB_DEFAULT = 16;                  // per-port capacity, MiB
   localparam longint unsigned PORT_WORDS_DEFAULT =
-      (64'(PORT_MB_DEFAULT) * 1024 * 1024) / WORD_BYTES;  // 2^18 words
+      (64'(PORT_MB_DEFAULT) * 1024 * 1024) / WORD_BYTES;  // 2^18 beats
+
+  // words per 512-bit beat for a given DW; address shift = log2 of it
+  function automatic int wpb(input int dw);
+    return 512 / dw;
+  endfunction
+  function automatic int dw_shift(input int dw);
+    return $clog2(512 / dw);
+  endfunction
 
   // ------------------------------------------------------------------
   // Slot budget, ui_clk cycles (spec section 1 and 4.3)
@@ -80,10 +89,12 @@ package hades_pkg;
     return v;
   endfunction
 
-  function automatic logic [N_MAX*32-1:0] dflt_size_flat();
+  // Default per-port sizes in DW-bit words (PORT_SIZE unit — see
+  // csr_regmap.md): 16 MiB / (dw/8) words.
+  function automatic logic [N_MAX*32-1:0] dflt_size_flat(input int dw);
     logic [N_MAX*32-1:0] v;
     for (int i = 0; i < N_MAX; i++)
-      v[i*32 +: 32] = 32'(PORT_WORDS_DEFAULT);
+      v[i*32 +: 32] = 32'((64'(PORT_MB_DEFAULT) * 1024 * 1024) / (dw / 8));
     return v;
   endfunction
 

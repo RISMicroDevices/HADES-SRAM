@@ -42,9 +42,9 @@ Port-level registers never flatten into the address space. Write `PORT_SEL` firs
 | Offset | Name | Acc | Reset | Description |
 |---|---|---|---|---|
 | 0x20 | `PORT_SEL` | RW | 0 | Window selector, port index 0 … N-1 |
-| 0x24 | `PORT_BASE` | RW | p·2^18 | Selected port base, 512-bit-word address bits [31:0] |
+| 0x24 | `PORT_BASE` | RW | p·2^18 | Selected port base, 512-bit-beat address bits [31:0] |
 | 0x28 | `PORT_BASE_HI` | RW | 0 | Selected port base bits [33:32] |
-| 0x2C | `PORT_SIZE` | RW | 2^18 | Selected port size in 512-bit words (2^18 words = 16 MiB) |
+| 0x2C | `PORT_SIZE` | RW | 2^22 | Selected port size in **DW-bit words** (2^22 words = 16 MiB at DW=32) |
 | 0x30 | `PORT_STAT_RD` | RO | 0 | Selected port read count |
 | 0x34 | `PORT_STAT_WR` | RO | 0 | Selected port write count |
 | 0x38 | `PORT_STAT_ERR` | RO/W1C | 0 | Selected port error count (illegal addr / timeout / SLVERR); any write clears it |
@@ -64,8 +64,8 @@ With `CSR_EN=0` there is no bus interface. The whole configuration is hard-wired
 | `P_MIN_PERIOD` | 600 | `CFG_MIN_PERIOD` | frequency interlock |
 | `P_REFRESH_DIV` | 2100 | `CFG_REFRESH_DIV` | |
 | `P_ZQ_DIV` | 32000 | `CFG_ZQ_DIV` | |
-| `P_PORT_BASE` | equal 16 MiB partitions | `PORT_BASE[+HI]` per port | **flat packed vector** `[N_MAX*34-1:0]`; port i = bits `[i*34 +: 34]`; fully user-overridable per port |
-| `P_PORT_SIZE` | 2^18 per port | `PORT_SIZE` per port | flat packed vector `[N_MAX*32-1:0]`; port i = bits `[i*32 +: 32]` |
+| `P_PORT_BASE` | equal 16 MiB partitions | `PORT_BASE[+HI]` per port | **flat packed vector** `[N_MAX*34-1:0]`; port i = bits `[i*34 +: 34]`; 512-bit-beat units; fully user-overridable per port |
+| `P_PORT_SIZE` | 2^22 per port | `PORT_SIZE` per port | flat packed vector `[N_MAX*32-1:0]`; port i = bits `[i*32 +: 32]`; **DW-bit word** units (2^22 = 16 MiB at DW=32) |
 
 Status is exposed on pins instead of a bus: `stat_calib_done`, `stat_ready`, `stat_refresh_active`, `stat_zq_active`, `stat_err[7:0]` (level-style mirror of `ERR_STATUS[5:0]`; bit4 = enable withheld because the clock is stopped/over-freq). A pin-level backdoor port (`bkp_req/we/port/addr/wdata/rdata/ack`) keeps content load/readout possible without a bus (M4).
 

@@ -1,9 +1,12 @@
 # HADES-SRAM simulation entry point.
-#   make            -> SIM=vcs (default): T6-basic + static smoke + param-override
-#   make SIM=xsim   -> same tests under Vivado xsim
-#   make lint       -> xvlog/xelab elaboration gate, both CSR_EN variants
+#   make              -> SIM=vcs (default): all variants
+#   make SIM=xsim     -> same tests under Vivado xsim (reduced OPS)
+#   make lint         -> xvlog/xelab elaboration gate, both CSR_EN variants
 #   make check_bounds -> static slot-budget assertion spot-checks (T11 preview)
 #   make clean
+#
+# Variants:  csr (CSR_EN=1 SYNC) | csr_async (CSR_EN=1 ASYNC) |
+#            static (CSR_EN=0 SYNC) | ovrd (CSR_EN=0 SYNC + param override)
 
 SIM      ?= vcs
 VCS      := /home/kumon/Synopsys/vcs/X-2025.06/bin/vcs
@@ -12,70 +15,84 @@ VIVADO_BIN := $(VIVADO)/bin
 BUILD    := build
 
 RTL := ../rtl/hades_pkg.sv ../rtl/hades_cdc.sv ../rtl/hades_freq_mon.sv \
-       ../rtl/hades_csr.sv ../rtl/hades_port.sv ../rtl/hades_sram_top.sv
+       ../rtl/hades_csr.sv ../rtl/hades_port.sv ../rtl/hades_timing_shaper.sv \
+       ../rtl/hades_mig_if.sv ../rtl/hades_sram_top.sv
 TB  := tb/tb_hades_top.sv
+MDL := model/mig_axi4_model.sv
 CPP := cpp/hades_tb.cpp
 
 RTL_ABS := $(abspath $(RTL))
 TB_ABS  := $(abspath $(TB))
+MDL_ABS := $(abspath $(MDL))
 CPP_ABS := $(abspath $(CPP))
+
+OPS_vcs  := 100000
+OPS_xsim := 10000
 
 .PHONY: test test-vcs test-xsim lint check_bounds clean
 test: test-$(SIM)
 
-# ---------------------------------------------------------------- VCS ------
-# Variants: csr (CSR_EN=1) / static (CSR_EN=0) / ovrd (CSR_EN=0 + param override)
+# ----------------------------------------------------------------- VCS -----
 VCS_COMMON := -full64 -sverilog -timescale=1ns/1ps -top tb_hades_top
 
-$(BUILD)/vcs_csr/simv: $(RTL) $(TB) $(CPP)
-	@mkdir -p $(@D)
-	cd $(@D) && $(VCS) $(VCS_COMMON) $(RTL_ABS) $(TB_ABS) $(CPP_ABS) -o simv > compile.log 2>&1 \
-	  || { echo "VCS compile FAILED ($@)"; tail -30 $(@D)/compile.log; exit 1; }
+DEF_csr       :=
+DEF_csr_async := +define+ASYNC
+DEF_static    := +define+CSR_STATIC
+DEF_ovrd      := +define+CSR_STATIC+PARAM_OVRD
 
-$(BUILD)/vcs_static/simv: $(RTL) $(TB) $(CPP)
-	@mkdir -p $(@D)
-	cd $(@D) && $(VCS) $(VCS_COMMON) +define+CSR_STATIC $(RTL_ABS) $(TB_ABS) $(CPP_ABS) -o simv > compile.log 2>&1 \
-	  || { echo "VCS compile FAILED ($@)"; tail -30 $(@D)/compile.log; exit 1; }
+TEST_csr       := all_csr
+TEST_csr_async := all_csr
+TEST_static    := all_static
+TEST_ovrd      := all_static
 
-$(BUILD)/vcs_ovrd/simv: $(RTL) $(TB) $(CPP)
-	@mkdir -p $(@D)
-	cd $(@D) && $(VCS) $(VCS_COMMON) +define+CSR_STATIC+PARAM_OVRD $(RTL_ABS) $(TB_ABS) $(CPP_ABS) -o simv > compile.log 2>&1 \
-	  || { echo "VCS compile FAILED ($@)"; tail -30 $(@D)/compile.log; exit 1; }
+VCS_VARIANTS := csr csr_async static ovrd
 
-test-vcs: $(BUILD)/vcs_csr/simv $(BUILD)/vcs_static/simv $(BUILD)/vcs_ovrd/simv
+$(BUILD)/vcs_%/simv: $(RTL) $(TB) $(MDL) $(CPP)
+	@mkdir -p $(@D)
+	cd $(@D) && $(VCS) $(VCS_COMMON) $(DEF_$*) $(RTL_ABS) $(TB_ABS) $(MDL_ABS) $(CPP_ABS) \
+	  -o simv > compile.log 2>&1 \
+	  || { echo "VCS compile FAILED ($@)"; tail -40 compile.log; exit 1; }
+
+test-vcs: $(foreach v,$(VCS_VARIANTS),$(BUILD)/vcs_$(v)/simv)
 	@fail=0; \
-	for cfg in "csr t6_csr" "static static_smoke" "ovrd static_smoke"; do \
-	  set -- $$cfg; \
-	  echo "=== VCS $$1 TEST=$$2 ==="; \
-	  ./$(BUILD)/vcs_$$1/simv +TEST=$$2 > $(BUILD)/vcs_$$1/run.log 2>&1; \
-	  grep -E "HADES-TB\] (FAIL|checks)" $(BUILD)/vcs_$$1/run.log | tail -5; \
-	  grep -q HADES_TEST_PASS $(BUILD)/vcs_$$1/run.log \
-	    && echo "VCS $$1: PASS" || { echo "VCS $$1: FAIL (see $(BUILD)/vcs_$$1/run.log)"; fail=1; }; \
+	for v in $(VCS_VARIANTS); do \
+	  t=$(TEST_csr); [ $$v = csr ] || [ $$v = csr_async ] && t=all_csr || t=all_static; \
+	  echo "=== VCS $$v TEST=$$t OPS=$(OPS_vcs) ==="; \
+	  ./$(BUILD)/vcs_$$v/simv +TEST=$$t +OPS=$(OPS_vcs) > $(BUILD)/vcs_$$v/run.log 2>&1; \
+	  grep -E "HADES-TB\] (FAIL|checks)" $(BUILD)/vcs_$$v/run.log | tail -8; \
+	  grep -q HADES_TEST_PASS $(BUILD)/vcs_$$v/run.log \
+	    && echo "VCS $$v: PASS" || { echo "VCS $$v: FAIL (see $(BUILD)/vcs_$$v/run.log)"; fail=1; }; \
 	done; \
 	[ $$fail -eq 0 ] && echo "ALL VCS TESTS PASS" || exit 1
 
 # ---------------------------------------------------------------- xsim -----
-XSIM_DEF_csr    :=
-XSIM_DEF_static := --define CSR_STATIC
-XSIM_DEF_ovrd   := --define CSR_STATIC --define PARAM_OVRD
-
-$(BUILD)/xsim_%/snap: $(RTL) $(TB) $(CPP)
+$(BUILD)/xsim_%/snap: $(RTL) $(TB) $(MDL) $(CPP)
 	@mkdir -p $(@D)
-	cd $(@D) && $(VIVADO_BIN)/xvlog --sv $(XSIM_DEF_$*) $(RTL_ABS) $(TB_ABS) > compile.log 2>&1 \
-	  || { echo "xvlog FAILED ($@)"; tail -30 $(@D)/compile.log; exit 1; }
-	cd $(@D) && g++ -shared -fPIC -I$(VIVADO)/data/xsim/include $(CPP_ABS) -o hadesdpi.so >> compile.log 2>&1
-	cd $(@D) && $(VIVADO_BIN)/xelab --timescale 1ns/1ps -top tb_hades_top -snapshot snap -sv_root . -sv_lib hadesdpi >> compile.log 2>&1 \
-	  || { echo "xelab FAILED ($@)"; tail -30 $(@D)/compile.log; exit 1; }
+	cd $(@D) && $(VIVADO_BIN)/xvlog --sv $(XSIM_DEF_$*) $(RTL_ABS) $(TB_ABS) $(MDL_ABS) > compile.log 2>&1 \
+	  || { echo "xvlog FAILED ($@)"; tail -30 compile.log; exit 1; }
+	cd $(@D) && g++ -shared -fPIC -static-libstdc++ -static-libgcc \
+	  -I$(VIVADO)/data/xsim/include $(CPP_ABS) -o hadesdpi.so >> compile.log 2>&1
+	cd $(@D) && $(VIVADO_BIN)/xelab --timescale 1ns/1ps -top tb_hades_top -snapshot snap \
+	  -sv_root . -sv_lib hadesdpi >> compile.log 2>&1 \
+	  || { echo "xelab FAILED ($@)"; tail -30 compile.log; exit 1; }
 
-test-xsim: $(BUILD)/xsim_csr/snap $(BUILD)/xsim_static/snap $(BUILD)/xsim_ovrd/snap
+XSIM_DEF_csr       :=
+XSIM_DEF_csr_async := --define ASYNC
+XSIM_DEF_static    := --define CSR_STATIC
+XSIM_DEF_ovrd      := --define CSR_STATIC --define PARAM_OVRD
+
+XSIM_VARIANTS := csr csr_async static ovrd
+
+test-xsim: $(foreach v,$(XSIM_VARIANTS),$(BUILD)/xsim_$(v)/snap)
 	@fail=0; \
-	for cfg in "csr t6_csr" "static static_smoke" "ovrd static_smoke"; do \
-	  set -- $$cfg; \
-	  echo "=== xsim $$1 TEST=$$2 ==="; \
-	  cd $(BUILD)/xsim_$$1 && $(VIVADO_BIN)/xsim snap -R -testplusarg TEST=$$2 > run.log 2>&1; cd ../..; \
-	  grep -E "HADES-TB\] (FAIL|checks)" $(BUILD)/xsim_$$1/run.log | tail -5; \
-	  grep -q HADES_TEST_PASS $(BUILD)/xsim_$$1/run.log \
-	    && echo "xsim $$1: PASS" || { echo "xsim $$1: FAIL (see $(BUILD)/xsim_$$1/run.log)"; fail=1; }; \
+	for v in $(XSIM_VARIANTS); do \
+	  t=all_static; [ $$v = csr ] || [ $$v = csr_async ] && t=all_csr; \
+	  echo "=== xsim $$v TEST=$$t OPS=$(OPS_xsim) ==="; \
+	  cd $(BUILD)/xsim_$$v && $(VIVADO_BIN)/xsim snap -R -testplusarg TEST=$$t \
+	    -testplusarg OPS=$(OPS_xsim) > run.log 2>&1; cd ../..; \
+	  grep -E "HADES-TB\] (FAIL|checks)" $(BUILD)/xsim_$$v/run.log | tail -8; \
+	  grep -q HADES_TEST_PASS $(BUILD)/xsim_$$v/run.log \
+	    && echo "xsim $$v: PASS" || { echo "xsim $$v: FAIL (see $(BUILD)/xsim_$$v/run.log)"; fail=1; }; \
 	done; \
 	[ $$fail -eq 0 ] && echo "ALL XSIM TESTS PASS" || exit 1
 

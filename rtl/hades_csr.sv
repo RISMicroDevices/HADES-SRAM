@@ -195,7 +195,7 @@ module hades_csr
       fb = dflt_base_flat();
       for (i = 0; i < N_MAX; i = i + 1) begin
         port_base_q[i] <= fb[i*BASE_W +: BASE_W];
-        port_size_q[i] <= 32'(PORT_WORDS_DEFAULT);
+        port_size_q[i] <= 32'((64'(PORT_MB) * 1024 * 1024) / (DW / 8));  // DW-bit words
       end
     end else begin
       // ---- bus capture ----
