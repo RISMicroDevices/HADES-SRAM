@@ -1,0 +1,36 @@
+# --- Simulation artifacts (VCS) ---
+simv*
+csrc/
+*.daidir/
+ucli.key
+vc_hdrs.h
+.DVE/
+# --- Simulation artifacts (Vivado xsim) ---
+xsim.dir/
+xelab.*
+xvlog.*
+xsim.*
+*.jou
+*.log
+*.pb
+*.wdb
+xsc.dir/
+# --- Waveforms ---
+*.vcd
+*.vpb
+*.fsdb
+*.shm
+# --- Vivado project junk ---
+.Xil/
+*.backup.jou
+*.backup.log
+vivado*.jou
+vivado*.log
+# --- FPGA build outputs ---
+*.bit
+*.ltx
+# --- Misc ---
+__pycache__/
+*.o
+*.so
+sim/build/
