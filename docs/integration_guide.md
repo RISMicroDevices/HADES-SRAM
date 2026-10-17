@@ -1,6 +1,6 @@
 # HADES-SRAM Integration Guide
 
-Status: **HW spike** (sections marked [*M-later*] are filled by the named milestone).
+Status: **M3 done** (sections marked [*M-later*] are filled by the named milestone).
 
 ## 1. Overview
 
@@ -29,6 +29,18 @@ Per target period, in `ui_clk` cycles:
 | 128 | 802 ✗ (elaboration `$error`) | 802 ✓ |
 
 Feasibility is enforced at elaboration (T11); N=128 @ 500 KHz is unreachable on one channel — scale down frequency or wait for the multi-channel path.
+
+### 3.1 Maintenance window and refresh gearing (M3)
+
+`hades_refresh_sched` owns `app_ref_req`/`app_zq_req` (User Refresh and ZQCS Input mode — in this mode the MIG never auto-refreshes; the IP is solely responsible for DRAM retention).
+
+- Period tick: `port_clk` is sampled through a 2FF synchronizer and rising-edge detected in the `ui_clk` domain (≤ 2-cycle jitter in ASYNC, absorbed by the slot margin). The maintenance window is the first `MAINT_SLOTS` (150) `ui_clk` cycles after each tick — the slot-table head; port service slots begin at 150 + `FIRST_LAT` + `CDC_OVHD`.
+- Refresh: a free-running `ui_clk` timer pends one debt every `CFG_REFRESH_DIV` cycles (default 2100 ≈ 7 µs). While enabled, debts are serviced only inside the maintenance window (zero maintenance jitter in the emulated domain), at most 2 per window — 100 KHz needs ≈ 1.43 refreshes per target period. A debt ≥ 4 (misconfiguration or clock stutter) overrides the window gate: a mid-period refresh beats losing DRAM contents. While DISABLED the window gate is open, so memory contents survive DISABLE→ENABLE reconfiguration. The timer never re-gears on service, so the long-run refresh rate is exactly 1/`CFG_REFRESH_DIV` (A6: `STAT_REFCNT` vs configured rate ±1%).
+- ZQCS: one due every `CFG_ZQ_DIV` target periods (default 32000 ≈ 64 ms @ 500 KHz), serviced after any pending refresh in the same window. Dues are counted in ticks, so ZQCS requires a running `port_clk` (refresh does not — it free-runs while disabled).
+- Configuration rule (not elaboration-enforced): `CFG_REFRESH_DIV` ≥ `TARGET_PERIOD`/2, otherwise the 2-per-window cap saturates the debt. Defaults satisfy this at both frequency gears by a wide margin.
+- JEDEC margin: worst refresh spacing is at 100 KHz = 7 µs + one 10 µs period = 17 µs ≪ 9×tREFI (70.2 µs postponement limit).
+- Worst-case window occupancy: refresh (105) + ZQCS (32) + periodic read (12) + handshakes ≈ 155 `ui_clk` cycles ≤ `MAINT_SLOTS` + slack; T3 repeats T2 under exactly this combination every window (plus a model-forced periodic read, `+MAINT_STRESS=1`) and the bit5 sentinel must stay silent.
+- `STATUS.REFRESH_ACTIVE`/`ZQ_ACTIVE` (and the static-variant pins) are high while the respective handshake is in flight; the MIG owns the tRFC/tZQCS dead time after the ack.
 
 ## 4. Dual clock domains [*M2+*]
 
@@ -62,7 +74,7 @@ VU9P = 3 SLRs; all IP logic + MIG C0 constrained to SLR2 pblock; per-port local 
 |---|---|---|
 | M1 (done) | Skeleton: pkg/CDC/freq-mon/CSR, empty datapath, CSR_EN variants | T6-basic, static smoke, bounds |
 | M2 (done) | Full per-port datapath: hades_port (CDC: Gray-FIFO + quasi-static slots), timing shaper (L=1/2, back-to-back), mig_if (FCFS AXI4 engine, 32-deep outstanding, sub-word lanes, stats + illegal/SLVERR/drop errors), AXI4 MIG model with refresh/periodic-read/ZQCS occupancy | T1 (1e5 ops), T2 (L=1/2 exact), T13a-lite — SYNC+ASYNC, CSR+static, VCS+xsim |
-| M3 | Refresh/ZQCS scheduling, determinism guards | T2(L=1), T3, T11, T14 |
+| M3 (done) | Refresh/ZQCS scheduling (window-geared debt scheduler, period tick), determinism guards; model maintenance now request-driven (+MAINT_STRESS / +RD_LAT_ADD knobs) | T2(L=1), T3 (+stress), T11 (5 legs), T14 — SYNC+ASYNC, CSR+static, VCS+xsim |
 | M4 | TDMA arbiter, N=8→32→64, backdoor | T4, T5, T7, T9, T11 |
 | M5 | Hardening, coverage, VCU1525 acceptance, IP package | T8–T13, A1–A10 |
 

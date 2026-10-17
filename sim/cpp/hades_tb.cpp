@@ -28,6 +28,7 @@ std::unordered_map<uint64_t, uint32_t> g_mem;
 struct ExpRd {
   uint64_t due_cycle;
   uint32_t data;
+  bool     late;   // T14: data arrives late; rvalid on schedule, data don't-care
 };
 std::queue<ExpRd> g_exp[kMaxPorts];
 
@@ -94,12 +95,19 @@ void hades_read_expect(int port, long long due_cycle, int addr) {
   uint64_t k = ((uint64_t)port << 32) | (uint32_t)addr;
   auto it = g_mem.find(k);
   g_exp[port & (kMaxPorts - 1)].push(
-      {(uint64_t)due_cycle, it == g_mem.end() ? 0u : it->second});
+      {(uint64_t)due_cycle, it == g_mem.end() ? 0u : it->second, false});
 }
 
 // a read to an illegal address returns 0 on schedule (synthetic response)
 void hades_read_expect0(int port, long long due_cycle) {
-  g_exp[port & (kMaxPorts - 1)].push({(uint64_t)due_cycle, 0u});
+  g_exp[port & (kMaxPorts - 1)].push({(uint64_t)due_cycle, 0u, false});
+}
+
+// T14 fault injection: the response is expected to arrive late, so the data
+// released on schedule is don't-care — but rvalid must still assert exactly
+// at `due_cycle` (the cycle-level contract stays observable, spec 4.3)
+void hades_read_expect_late(int port, long long due_cycle) {
+  g_exp[port & (kMaxPorts - 1)].push({(uint64_t)due_cycle, 0u, true});
 }
 
 // called for every port at every port_clk edge (post-edge sample):
@@ -112,7 +120,7 @@ void hades_port_edge(int port, long long cycle, int rvalid, int rdata) {
       g_err++;
       printf("[HADES-TB] FAIL: port %d missing rvalid at cycle %lld (T2 violation)\n",
              port, cycle);
-    } else if ((uint32_t)rdata != q.front().data) {
+    } else if (!q.front().late && (uint32_t)rdata != q.front().data) {
       g_err++;
       printf("[HADES-TB] FAIL: port %d cycle %lld data got=0x%08x exp=0x%08x\n",
              port, cycle, (uint32_t)rdata, q.front().data);

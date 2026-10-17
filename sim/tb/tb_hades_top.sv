@@ -5,10 +5,12 @@
 // via DPI-C (expected memory, exact-latency due-cycle queues, accounting).
 //
 // Build variants (+define+):
-//   (none)                 CSR_EN=1, SYNC    TEST=all_csr (t6_csr,t1,t2,t13a)
+//   (none)                 CSR_EN=1, SYNC    TEST=all_csr (t6_csr,t1,t2,t3,t13a)
 //   ASYNC                  CSR_EN=1, ASYNC   TEST=all_csr
-//   CSR_STATIC             CSR_EN=0, SYNC    TEST=all_static
+//   CSR_STATIC             CSR_EN=0, SYNC    TEST=all_static (static,t3)
 //   CSR_STATIC+PARAM_OVRD  CSR_EN=0, SYNC, user P_PORT_BASE/SIZE overrides
+// Dedicated runs (not in all_*): TEST=t3 +MAINT_STRESS=1 (worst-case
+// maintenance alignment), TEST=t14 +RD_LAT_ADD=<n> (bit5 sentinel fault).
 //
 // Clocks: ui_clk 300 MHz.  SYNC: port_clk derived from ui_clk by integer
 // divider (same-source).  ASYNC: independent realtime generator,
@@ -131,6 +133,13 @@ module tb_hades_top;
   logic        stat_calib_done, stat_ready, stat_refresh_active, stat_zq_active;
   logic [7:0]  stat_err;
 
+  // DUT <-> model maintenance handshake
+  logic        ref_req, ref_ack, zq_req, zq_ack;
+
+  // T14: set while fault-injected late responses are expected; gates the
+  // rdata X/mismatch checks (rvalid must still assert on schedule)
+  bit expect_sentinel = 1'b0;
+
   // DUT AXI4 master <-> model slave
   logic [3:0]         axi_awid;
   logic [AXI_ADDR_W-1:0] axi_awaddr;
@@ -205,10 +214,10 @@ module tb_hades_top;
     .m_axi_rlast    (axi_rlast),
     .m_axi_rvalid   (axi_rvalid),
     .m_axi_rready   (axi_rready),
-    .app_ref_req    (),
-    .app_ref_ack    (1'b0),
-    .app_zq_req     (),
-    .app_zq_ack     (1'b0),
+    .app_ref_req    (ref_req),
+    .app_ref_ack    (ref_ack),
+    .app_zq_req     (zq_req),
+    .app_zq_ack     (zq_ack),
     .s_axil_awaddr  (s_axil_awaddr),
     .s_axil_awvalid (s_axil_awvalid),
     .s_axil_awready (s_axil_awready),
@@ -274,10 +283,10 @@ module tb_hades_top;
     .s_axi_rlast   (axi_rlast),
     .s_axi_rvalid  (axi_rvalid),
     .s_axi_rready  (axi_rready),
-    .app_ref_req   (1'b0),
-    .app_ref_ack   (),
-    .app_zq_req    (1'b0),
-    .app_zq_ack    ()
+    .app_ref_req   (ref_req),
+    .app_ref_ack   (ref_ack),
+    .app_zq_req    (zq_req),
+    .app_zq_ack    (zq_ack)
   );
 
   // ------------------------------------------------------------------
@@ -294,6 +303,7 @@ module tb_hades_top;
   import "DPI-C" context function void     hades_mem_write(int port, int addr, int data);
   import "DPI-C" context function void     hades_read_expect(int port, longint due_cycle, int addr);
   import "DPI-C" context function void     hades_read_expect0(int port, longint due_cycle);
+  import "DPI-C" context function void     hades_read_expect_late(int port, longint due_cycle);
   import "DPI-C" context function void     hades_port_edge(int port, longint cycle,
                                                            int rvalid, int rdata);
   import "DPI-C" context function void     hades_check_eq(string what, longint got, longint exp);
@@ -374,7 +384,7 @@ module tb_hades_top;
     pcycle = pcycle + 1;
     for (int p = 0; p < N_MAX; p++) begin
       if ($isunknown(sram_rvalid[p]) ||
-          (sram_rvalid[p] === 1'b1 && $isunknown(sram_rdata[p])))
+          (!expect_sentinel && sram_rvalid[p] === 1'b1 && $isunknown(sram_rdata[p])))
         hades_fail($sformatf("X on port %0d outputs at pcycle %0d (rvalid=%b rdata=%h)",
                              p, pcycle, sram_rvalid[p], sram_rdata[p]));
       hades_port_edge(p, pcycle, (sram_rvalid[p] === 1'b1) ? 1 : 0,
@@ -727,6 +737,118 @@ module tb_hades_top;
   endtask
 
   // ------------------------------------------------------------------
+  // T3: maintenance stress — worst refresh+ZQCS+periodic-read combination,
+  // repeating the full T2 content.  Maintenance cadence is shrunk so the
+  // window is exercised every target period (refresh due every period,
+  // ZQCS every 4 periods); the MAINT_STRESS plusarg additionally forces a
+  // PHY periodic read into every refresh window (model side).
+  // Determinism proof: ERR_STATUS stays 0 (bit5 sentinel silent) and the
+  // refresh rate tracks CFG_REFRESH_DIV (A6 rehearsal).
+  // ------------------------------------------------------------------
+  task automatic test_t3();
+    logic [31:0] rd;
+    logic [31:0] refc0, refc1;
+    longint      w0, w1;
+    begin
+      hades_log("--- T3: maintenance stress, T2 content ---");
+      calib_done = 1'b1;
+`ifdef CSR_STATIC
+      // static variant: fixed P_REFRESH_DIV=2100 / P_ZQ_DIV=32000 / L=2
+      #10_000;
+      fork
+        begin
+          sram_write_burst(0, 64, 32'h9000, 32'h3C00_0000);
+          sram_read_burst(0, 64, 32'h9000);
+        end
+        begin
+          sram_write_burst(1, 64, 32'hA000, 32'hC300_0000);
+          sram_read_burst(1, 64, 32'hA000);
+        end
+      join
+      drain();
+      hades_check_eq("T3 static: stat_err clean", stat_err, 0);
+`else
+      axil_wr(CSR_CTRL, 32'h0);
+      axil_wr(CSR_CFG_REFRESH_DIV, 32'd600);   // one refresh due per window
+      axil_wr(CSR_CFG_ZQ_DIV, 32'd4);          // ZQCS every 4 windows
+      test_t2();                               // spec: repeat T2 under stress
+
+      // refresh rate over 100 windows (enabled, no traffic)
+      csr_enable(2, 64'h3);
+      axil_rd(CSR_STAT_REFCNT, refc0);
+      w0 = pcycle;
+      repeat (100) @(posedge port_clk);
+      axil_rd(CSR_STAT_REFCNT, refc1);
+      w1 = pcycle;
+      hades_check_range("T3 STAT_REFCNT rate (~1/window)",
+                        refc1 - refc0, (w1 - w0) * 95 / 100, (w1 - w0) * 105 / 100 + 2);
+
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("T3: ERR_STATUS clean under worst maintenance", rd & 32'h3F, 0);
+      axil_wr(CSR_CFG_REFRESH_DIV, 32'd2100);  // restore defaults
+      axil_wr(CSR_CFG_ZQ_DIV, 32'd32000);
+      axil_wr(CSR_CTRL, 32'h0);
+`endif
+    end
+  endtask
+
+  // ------------------------------------------------------------------
+  // T14: response-window sentinel — the model's +RD_LAT_ADD stretches every
+  // backend read past the L-cycle contract; each release must still assert
+  // rvalid on schedule (data don't-care) and ERR_STATUS.bit5 must set.
+  // Dedicated run only (not part of all_csr/all_static).
+  // ------------------------------------------------------------------
+  task automatic test_t14();
+    logic [31:0] rd;
+    int unsigned lat_add;
+    begin
+      hades_log("--- T14: response-window sentinel fault injection ---");
+      if (!$value$plusargs("RD_LAT_ADD=%d", lat_add) || lat_add == 0) begin
+        hades_log("T14 skipped: needs +RD_LAT_ADD=<n> model stretch");
+        return;
+      end
+      calib_done = 1'b1;
+`ifdef CSR_STATIC
+      #10_000;   // static auto-enable, P_L=2
+      expect_sentinel = 1;
+      sram_write(0, 32'h300, 32'h5AFE_0001);
+      for (int k = 0; k < 3; k++) begin
+        @(negedge port_clk);
+        sram_en[0] <= 1'b1; sram_we[0] <= 1'b0; sram_addr[0] <= 32'h300 + k;
+        hades_read_expect_late(0, pcycle + 1 + 2);
+        @(negedge port_clk);
+        sram_en[0] <= 1'b0;
+        @(negedge port_clk);
+      end
+      drain();
+      expect_sentinel = 0;
+      hades_check_eq("T14 static: sentinel stat_err[5] set", stat_err[5], 1);
+`else
+      csr_enable(1, 64'h1);   // L=1: tightest response window
+      expect_sentinel = 1;
+      sram_write(0, 32'h300, 32'h5AFE_0001);
+      for (int k = 0; k < 3; k++) begin
+        @(negedge port_clk);
+        sram_en[0] <= 1'b1; sram_we[0] <= 1'b0; sram_addr[0] <= 32'h300 + k;
+        hades_read_expect_late(0, pcycle + 1 + cur_lat);
+        @(negedge port_clk);
+        sram_en[0] <= 1'b0;
+        @(negedge port_clk);
+      end
+      drain();
+      expect_sentinel = 0;
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("T14: ERR_STATUS.bit5 sentinel set", rd & 32'h20, 32'h20);
+      hades_check_eq("T14: first-error port = 0", (rd >> 8) & 32'hFF, 0);
+      axil_wr(CSR_ERR_STATUS, 32'h20);   // W1C
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("T14: bit5 W1C clears", rd & 32'h3F, 0);
+      axil_wr(CSR_CTRL, 32'h0);
+`endif
+    end
+  endtask
+
+  // ------------------------------------------------------------------
   // T13a (lite): X on CDC paths / inputs must not reach data outputs
   // (full X-propagation and metastability campaign is M5/T13)
   // ------------------------------------------------------------------
@@ -831,6 +953,8 @@ module tb_hades_top;
     if (test == "all" || test == "all_csr" || test == "all_static") begin
 `ifdef CSR_STATIC
       test_static();
+      hades_phase_init();
+      test_t3();
 `else
       test_t6_csr();
       hades_phase_init();
@@ -838,11 +962,15 @@ module tb_hades_top;
       hades_phase_init();
       test_t2();
       hades_phase_init();
+      test_t3();
+      hades_phase_init();
       test_t13a();
 `endif
     end else if (test == "t6_csr")        test_t6_csr();
     else if (test == "t1") begin calib_done = 1'b1; test_t1(n_ops); end
     else if (test == "t2") begin calib_done = 1'b1; test_t2();      end
+    else if (test == "t3") begin calib_done = 1'b1; test_t3();      end
+    else if (test == "t14") begin                    test_t14();    end
     else if (test == "t13a") begin calib_done = 1'b1; test_t13a();  end
     else if (test == "static_smoke")     test_static();
     else $display("[HADES-TB] unknown TEST=%s", test);

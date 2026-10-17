@@ -3,12 +3,19 @@
 // 512-bit AXI4 slave with:
 //   - typical read latency RD_LAT_TYP ui_clk cycles, +ROW_LAT with
 //     ROW_HIT_PROB_PCT probability (row conflict), +0..RD_JITTER jitter
-//   - maintenance occupancy: refresh (REF_PERIOD/REF_BLOCK), periodic read
-//     (PRD_PERIOD/PRD_BLOCK), ZQCS (ZQ_PERIOD/ZQ_BLOCK) — all block AR/AW/W
-//     and pause R, modeling MIG dead time (worst case must stay <= 600 ns)
+//   - request-driven maintenance dead time (M3): with User Refresh and ZQCS
+//     Input mode the MIG never auto-refreshes — each app_ref_ack blocks the
+//     bus for REF_BLOCK (~tRFC), each app_zq_ack for ZQ_BLOCK (~tZQCS);
+//     overlapping requests concatenate (busy-until accounting).  The PHY
+//     periodic read stays autonomous (PRD_PERIOD/PRD_BLOCK, not user-
+//     schedulable).  All block AR/AW/W and pause R, modeling MIG dead time
+//     (worst case must stay <= 600 ns)
 //   - sparse 64-bit-byte-addressable memory (associative), WSTRB honored
 //   - strictly in-order read returns (DUT uses a single AXI ID)
-//   - app_ref/app_zq handshake responders (M3 will drive the requests)
+// Run-time knobs (plusargs):
+//   +MAINT_STRESS=1  T3 worst case: every refresh drags a periodic-read
+//                    block into the same maintenance window
+//   +RD_LAT_ADD=n    T14 fault injection: stretch every read latency by n
 // SLVERR/timeout fault injection arrives with T8 in M5.
 //-----------------------------------------------------------------------------
 `timescale 1ns/1ps
@@ -20,11 +27,9 @@ module mig_axi4_model #(
   parameter int ROW_LAT          = 40,
   parameter int RD_JITTER        = 4,
   parameter int WR_LAT           = 20,
-  parameter int REF_PERIOD       = 2100,   // 7 us @ 300 MHz
-  parameter int REF_BLOCK        = 105,    // ~tRFC 350 ns
+  parameter int REF_BLOCK        = 105,    // ~tRFC 350 ns (per app_ref_ack)
   parameter int PRD_PERIOD       = 997,    // PHY periodic read cadence
   parameter int PRD_BLOCK        = 12,
-  parameter int ZQ_PERIOD        = 210000, // scaled-down ZQCS cadence for sim
   parameter int ZQ_BLOCK         = 32,     // tZQCS ~ 128 CK ~ 32 ui cycles
   parameter int MAX_OUT          = 32
 ) (
@@ -68,7 +73,7 @@ module mig_axi4_model #(
 );
 
   // ------------------------------------------------------------------
-  // cycle counter + maintenance windows
+  // cycle counter + maintenance dead time
   // ------------------------------------------------------------------
   longint unsigned cyc;
 
@@ -77,9 +82,54 @@ module mig_axi4_model #(
     else      cyc <= cyc + 1;
   end
 
-  wire logic maint = ((cyc % REF_PERIOD) < REF_BLOCK) ||
-                     (((cyc + 500)  % PRD_PERIOD) < PRD_BLOCK) ||
-                     (((cyc + 1000) % ZQ_PERIOD)  < ZQ_BLOCK);
+  // run-time fault/stress knobs (see file header)
+  int unsigned rd_lat_add;
+  int unsigned maint_stress;
+  initial begin
+    rd_lat_add   = 0;
+    maint_stress = 0;
+    void'($value$plusargs("RD_LAT_ADD=%d", rd_lat_add));
+    void'($value$plusargs("MAINT_STRESS=%d", maint_stress));
+    if (rd_lat_add != 0)
+      $display("[MIG-MODEL] RD_LAT_ADD=%0d (T14 latency-stretch fault)", rd_lat_add);
+    if (maint_stress != 0)
+      $display("[MIG-MODEL] MAINT_STRESS=1 (T3 worst-case maintenance)");
+  end
+
+  // request-driven maintenance (ref/ZQ acks), busy-until accounting so
+  // overlapping maintenance concatenates (worst case); the PHY periodic
+  // read remains autonomous — it is not user-schedulable in the real MIG
+  longint unsigned busy_until;
+  logic            ref_ack_d, zq_ack_d;
+
+  always_ff @(posedge aclk) begin
+    if (arst) begin
+      ref_ack_d <= 1'b0;
+      zq_ack_d  <= 1'b0;
+    end else begin
+      ref_ack_d <= app_ref_ack;
+      zq_ack_d  <= app_zq_ack;
+    end
+  end
+
+  wire logic ref_ack_rise = app_ref_ack & ~ref_ack_d;
+  wire logic zq_ack_rise  = app_zq_ack  & ~zq_ack_d;
+
+  always_ff @(posedge aclk) begin
+    if (arst) begin
+      busy_until <= 0;
+    end else if (ref_ack_rise) begin
+      // MAINT_STRESS (T3): a periodic read lands in the same window,
+      // concatenated right behind the refresh block
+      busy_until <= ((cyc > busy_until) ? cyc : busy_until) + REF_BLOCK
+                    + (maint_stress != 0 ? PRD_BLOCK : 0);
+    end else if (zq_ack_rise) begin
+      busy_until <= ((cyc > busy_until) ? cyc : busy_until) + ZQ_BLOCK;
+    end
+  end
+
+  wire logic maint = (cyc < busy_until) ||
+                     (((cyc + 500) % PRD_PERIOD) < PRD_BLOCK);
 
   // ------------------------------------------------------------------
   // sparse memory, beat-addressed (64 B)
@@ -123,7 +173,7 @@ module mig_axi4_model #(
       rd_ent_t e;
       longint unsigned lat;
       lat = RD_LAT_TYP + (m_rnd(99) < ROW_HIT_PROB_PCT ? ROW_LAT : 0)
-            + m_rnd(RD_JITTER);
+            + m_rnd(RD_JITTER) + rd_lat_add;
       e.due  = cyc + lat;
       e.addr = s_axi_araddr;
       rd_q.push_back(e);

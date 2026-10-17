@@ -24,7 +24,7 @@ General rules (spec §3.3):
 | 0x1C | `CFG_MIN_PERIOD` | RW | 600 | Shortest allowed `port_clk` period in `ui_clk` cycles (600 = 500 KHz); measured period below this ⇒ `over_freq`, ENABLE rejected |
 | 0x40 | `CFG_REFRESH_DIV` | RW | 2100 | Refresh slot interval in `ui_clk` cycles (2100 = 7 µs @ 300 MHz) |
 | 0x44 | `CFG_ZQ_DIV` | RW | 32000 | ZQCS interval in target periods (32000 ≈ 64 ms @ 500 KHz) |
-| 0x50 | `ERR_STATUS` | W1C | 0 | bit0 illegal address; bit1 backend timeout; bit2 dropped request (must stay 0); bit3 AXI SLVERR; bit4 ENABLE rejected / clock lost while armed; bit5 response-window sentinel (must stay 0); bits[13:8] = first-error port number. Clearing the last set bit also clears the port field and `ERR_ADDR` |
+| 0x50 | `ERR_STATUS` | W1C | 0 | bit0 illegal address; bit1 backend timeout; bit2 dropped request (must stay 0); bit3 AXI SLVERR; bit4 ENABLE rejected / clock lost while armed; bit5 response-window sentinel (must stay 0); bits[13:8] = first-error port number. All bits are **event-latched**: a W1C clear sticks (the per-port sticky state in `PORT_STAT_ERR`/`stat_err` is independent and need not be cleared first); a later new violation re-sets the bit. Clearing the last set bit also clears the port field and `ERR_ADDR` |
 | 0x54 | `ERR_ADDR` | RO | 0 | First-error address (incl. port field) |
 | 0x58 | `STAT_MAXLAT` | RO | 0 | Max observed backend read latency, `ui_clk` cycles |
 | 0x5C | `STAT_REFCNT` | RO | 0 | Cumulative refresh count (cross-check refresh rate) |

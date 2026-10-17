@@ -57,10 +57,11 @@ module hades_csr
   input  wire logic        refresh_active,
   input  wire logic        zq_active,
 
-  // datapath error/stat inputs (M1: tied 0 by parent; come alive M2-M5)
+  // datapath error/stat inputs.  err_in carries 1-cycle event pulses:
   // err_in[3:0] = spec ERR_STATUS bits 0..3 (illegal addr, timeout, drop,
   // SLVERR); err_in[4] = response-window sentinel (spec bit5).  bit4 is
-  // generated internally.
+  // generated internally.  Pulse sources make W1C clears stick (a level
+  // source would re-set the bit until the origin is also cleared).
   input  wire logic [4:0]           err_in,
   input  wire logic [7:0]           err_in_port,
   input  wire logic [31:0]          err_in_addr,
