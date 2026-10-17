@@ -1,6 +1,6 @@
 # HADES-SRAM Integration Guide
 
-Status: **M1 skeleton** (sections marked [*M-later*] are filled by the named milestone).
+Status: **HW spike** (sections marked [*M-later*] are filled by the named milestone).
 
 ## 1. Overview
 
@@ -65,3 +65,30 @@ VU9P = 3 SLRs; all IP logic + MIG C0 constrained to SLR2 pblock; per-port local 
 | M3 | Refresh/ZQCS scheduling, determinism guards | T2(L=1), T3, T11, T14 |
 | M4 | TDMA arbiter, N=8→32→64, backdoor | T4, T5, T7, T9, T11 |
 | M5 | Hardening, coverage, VCU1525 acceptance, IP package | T8–T13, A1–A10 |
+
+## 10. VCU1525 hardware spike (2026-10-17)
+
+Stock MIG DDR4 example design, built and probed to validate the board, license, and JTAG path before M5-hw. Scripts: `fpga/vcu1525/spike/` (`mig_example_gen.tcl` → `build_example.tcl` → `program_spike.tcl`).
+
+Resolved board facts (Vivado 2024.1, board files vcu1525:part0:1.3):
+
+- FPGA part is `xcvu9p-fsgd2104-2L-e` (**-2L** low-voltage grade; the spec's `flgb2104` is wrong — deviation, board file wins)
+- 4 independent DDR4 channels `ddr4_sdram_c0..c3`, each with its own `default_300mhz_clk0..3` differential reference; HADES uses c0
+- MIG c0 board preset: DDR4-2400 (833 ps), RDIMM MTA18ASF2G72PZ-2G3 (16 GB), 72-bit with **ECC enabled**, AXI4 user interface 512-bit data / 34-bit address, ui_clk 300 MHz (4:1), differential 300 MHz sysclk, `sys_rst` = CPU_RESET button (AL20, LVCMOS12)
+- **"User Refresh and ZQCS Input" = `CONFIG.C0.DDR4_UserRefresh_ZQCS`** (false in stock; must be true in the M5-hw build — M3 drives `app_ref_req`/`app_zq_req`)
+- Stock example: `example_top` + traffic generator; pins auto-constrained from board presets except the two status outputs, mapped by `spike_pins.xdc`: GPIO_LED_0 (BC21) = `c0_init_calib_complete`, GPIO_LED_1 (BB21) = `c0_data_compare_error`
+- MIG calib debug XSDB is off in the board preset (`Debug_Signal = Disable`); calib observation = LEDs. MCS UART not pinned out in the stock example.
+- **Reset polarity trap**: the MIG `sys_rst` port is ACTIVE_HIGH, but the VCU1525 `resetn` board interface (CPU_RESET button, AL20) has `rst_polarity=0` — the button idles **high**, so a direct hookup holds the MIG in reset forever (observed: `init_calib_complete` stuck at 0 with live ui_clk). M5-hw must invert the reset (or drive it from a GPIO/VIO during bring-up). The spike `spike_top` works around it with a VIO-driven reset.
+
+Host access decisions (2026-10-17, user):
+
+- **JTAG**: Windows-side `hw_server` (from `C:\Xilinx\Vivado\2024.1\bin`) + `connect_hw_server -url <win-host>:3121` from WSL2 Vivado; no usbipd-win. First hw_server run may need a firewall allow on Windows.
+- **Host control path: JTAG-AXI only — no PCIe/XDMA in the final design** (deviation from the spec's XDMA assumption). CSR read/write via a JTAG-to-AXI-Master IP driven by hw_server Tcl (`fpga/vcu1525/host/`); bandwidth acceptance runs on the on-chip SELFTEST_EN PRBS engines with CSR counters. Consequences: M5-hw build drops XDMA; `sw/` becomes Tcl host scripts instead of a C driver; PCIe slot only supplies power.
+- PCIe is not passed through to WSL2 and stays unused.
+
+Board bring-up log:
+
+- Stock build: synth+impl+bitstream green, WNS +0.092 ns; Vivado license covers xcvu9p for Synthesis and Implementation
+- JTAG chain verified: Windows hw_server reachable from WSL2 at `localhost:3121` (mirrored networking — no firewall rule needed), FTDI target `xilinx_tcf/Xilinx/12809621t033A`, 80 MB bitstream programmed in ~3.5 min
+- First program: user could not visually confirm LEDs; both status outputs are latched levels in `example_tb`, and the observed blinking green LED is the FTDI JTAG-activity LED (hw_server polls). Added `spike_top.sv` + VIO (`add_vio_and_build.tcl`, `program_and_read.tcl`, `read_vio.tcl`) for definitive JTAG readout: probes `calib` / `cmperr` / `hb[31:0]` / `rst_pin`, VIO output `rst_drv` drives MIG sys_rst (VIO probe names follow the connected RTL net names, not the VIO port names)
+- **2026-10-17 PASS**: `calib=1`, `compare_err=0`, heartbeat incrementing, `rst_pin=1` (confirms the reset polarity trap on silicon). VIO build WNS +0.244 ns. Gotchas hit: Tcl `regsub` brace-quoted subSpec keeps `\n` literal (corrupted the patched RTL — always syntax-check generated files); files dropped into a project's managed `imports/` dir get auto-disabled; scoped `BOARD_PART_PIN` constraints fail when the top-level port is no longer wired straight to the IP cell (constrain the port directly); `refresh_hw_device -update_hw_probes false` suppresses VIO probe enumeration.

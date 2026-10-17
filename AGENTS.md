@@ -5,7 +5,8 @@
 
 ## Toolchain (this host, WSL2)
 - VCS: `/home/kumon/Synopsys/vcs/X-2025.06/bin/vcs` (license `LM_LICENSE_FILE=27080@KUMON-S1-HALO` — usually already in env; WSL2 kernel warning is benign)
-- Vivado 2024.1: `/home/kumon/Xilinx/Vivado/2024.1/bin` (`xvlog/xelab/xsim`, `hw_server`); VCU1525 board files present (`xcvu9p-fsgd2104-2`)
+- Vivado 2024.1: `/home/kumon/Xilinx/Vivado/2024.1/bin` (`xvlog/xelab/xsim`); VCU1525 board files present (part `xcvu9p-fsgd2104-2L-e`); Windows side also has Vivado 2024.1 (`C:\Xilinx\Vivado\2024.1`) used for hw_server/JTAG
+- JTAG: Windows hw_server + `connect_hw_server -url <win-host>:3121` from WSL2 (user decision, no usbipd-win); host control path = JTAG-AXI, no PCIe/XDMA (user decision)
 - **No cocotb, no Verilator** (user decision). Testbench = SystemVerilog + DPI-C C++.
 
 ## Standard commands

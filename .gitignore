@@ -29,6 +29,8 @@ vivado*.log
 # --- FPGA build outputs ---
 *.bit
 *.ltx
+fpga/vcu1525/spike/work/
+fpga/vcu1525/spike/ex_proj/
 # --- Misc ---
 __pycache__/
 *.o
