@@ -14,7 +14,8 @@
 // M2: full single/multi-port datapath — hades_port (CDC + shaper) array ->
 // hades_mig_if (FCFS engine, AXI4, outstanding).  M3: hades_refresh_sched
 // (user refresh/ZQCS, maintenance window at the slot-table head).
-// TDMA slot gating arrives in M4 (hades_arbiter in front of mig_if).
+// M4: hades_arbiter (TDMA static slot gating in front of mig_if) +
+// hades_backdoor (CSR/pin host channel, lowest-priority requester).
 //-----------------------------------------------------------------------------
 `default_nettype none
 
@@ -114,7 +115,7 @@ module hades_sram_top
   output          logic               stat_zq_active,
   output          logic [7:0]         stat_err,      // mirrors ERR_STATUS[5:0]
 
-  // ---- pin-level backdoor (CSR_EN=0) — M4; inactive in M2 ----
+  // ---- pin-level backdoor (CSR_EN=0; CSR_EN=1 uses the BKP_* registers) ----
   input  wire logic                   bkp_req,
   input  wire logic                   bkp_we,
   input  wire logic [7:0]             bkp_port,
@@ -181,10 +182,24 @@ module hades_sram_top
   logic        win_stky_any, ovf_stky_any;
   logic        refresh_active, zq_active;
   logic [31:0] stat_refcnt;
-  logic        period_tick;              // maintenance-window head (M4 arbiter)
+  logic        period_tick;              // maintenance-window head
+
+  // backdoor command interface (from CSR registers or static pins) + engine
+  logic                  bkp_cmd_rd, bkp_cmd_wr;
+  logic [7:0]            bkp_cmd_port;
+  logic [39:0]           bkp_cmd_addr;
+  logic [DW-1:0]         bkp_cmd_wdata;
+  logic                  bkp_busy, bkp_done, bkp_err;
+  logic [DW-1:0]         bkp_rdata_eng;
 
   generate
     if (CSR_EN) begin : g_csr
+      // CSR-side backdoor register channel
+      logic        c_bkp_go_rd, c_bkp_go_wr;
+      logic [7:0]  c_bkp_port;
+      logic [39:0] c_bkp_addr;
+      logic [31:0] c_bkp_wdata;
+
       hades_csr #(
         .IS_SYNC (IS_SYNC),
         .DW      (DW)
@@ -228,8 +243,28 @@ module hades_sram_top
         .enable          (enable_eff),
         .soft_reset_stb  (soft_reset_stb),
         .port_err_clr    (port_err_clr),
-        .port_sel_o      (port_sel)
+        .port_sel_o      (port_sel),
+        .bkp_go_rd       (c_bkp_go_rd),
+        .bkp_go_wr       (c_bkp_go_wr),
+        .bkp_port_o      (c_bkp_port),
+        .bkp_addr_o      (c_bkp_addr),
+        .bkp_wdata_o     (c_bkp_wdata),
+        .bkp_busy        (bkp_busy),
+        .bkp_done        (bkp_done),
+        .bkp_err         (bkp_err),
+        .bkp_rdata_i     (bkp_rdata_eng[31:0])
       );
+
+      assign bkp_cmd_rd    = c_bkp_go_rd;
+      assign bkp_cmd_wr    = c_bkp_go_wr;
+      assign bkp_cmd_port  = c_bkp_port;
+      assign bkp_cmd_addr  = c_bkp_addr;
+      assign bkp_cmd_wdata = DW'(c_bkp_wdata);   // DW>32: upper bits read 0
+
+      // the pin-level backdoor inputs are unused in the CSR variant
+      logic unused_bkp_pins;
+      assign unused_bkp_pins = &{1'b0, bkp_req, bkp_we, bkp_port, bkp_addr,
+                               bkp_wdata};
 
       assign stat_calib_done     = 1'b0;
       assign stat_ready          = 1'b0;
@@ -246,6 +281,22 @@ module hades_sram_top
       assign soft_reset_stb = 1'b0;
       assign port_err_clr   = 1'b0;
       assign port_sel       = 8'd0;
+
+      // pin-level backdoor drive: req synced; the integrator holds the
+      // fields stable while req is high; ack = done pulse (above)
+      logic bkp_req_u, bkp_req_d;
+      hades_sync2 u_bkp_req_sync (.clk(ui_clk), .rst(ui_rst),
+                                  .d(bkp_req), .q(bkp_req_u));
+      always_ff @(posedge ui_clk) begin
+        if (ui_rst) bkp_req_d <= 1'b0;
+        else        bkp_req_d <= bkp_req_u;
+      end
+      wire logic bkp_start = bkp_req_u & ~bkp_req_d & ~bkp_busy;
+      assign bkp_cmd_rd    = bkp_start & ~bkp_we;
+      assign bkp_cmd_wr    = bkp_start &  bkp_we;
+      assign bkp_cmd_port  = bkp_port;
+      assign bkp_cmd_addr  = {6'b0, bkp_addr};
+      assign bkp_cmd_wdata = bkp_wdata;
 
       assign stat_calib_done     = calib_done;
       assign stat_ready          = enable_eff;
@@ -288,21 +339,51 @@ module hades_sram_top
   wire logic ui_rst_soft  = ui_rst | soft_reset_stb;
 
   // ------------------------------------------------------------------
-  // Backend engine (M2: FCFS; M4 inserts the TDMA arbiter in front)
+  // Backend engine: TDMA slot gating (M4: hades_arbiter) in front of the
+  // FCFS engine; backdoor enters mig_if as the lowest-priority requester.
   // ------------------------------------------------------------------
-  logic [N-1:0]          p_rd_vld;
+  logic [N-1:0]          pr_rd_vld;  // port FIFO heads (raw)
   logic [N-1:0][AW-1:0]  p_rd_addr;
-  logic [N-1:0]          p_rd_gnt;
-  logic [N-1:0]          p_wr_vld;
+  logic [N-1:0]          pr_wr_vld;
   logic [N-1:0][AW-1:0]  p_wr_addr;
   logic [N-1:0][DW-1:0]  p_wr_data;
+  logic [N-1:0]          p_rd_vld;   // arbiter-gated, to mig_if
+  logic [N-1:0]          p_wr_vld;
+  logic [N-1:0]          p_rd_gnt;
   logic [N-1:0]          p_wr_gnt;
   logic [N-1:0]          p_rsp_vld;
   logic [N-1:0][DW-1:0]  p_rsp_data;
 
+  // backdoor engine <-> mig_if
+  logic                  bk_rd_req, bk_rd_gnt, bk_rd_done;
+  logic [BASE_W-1:0]     bk_rd_beat;
+  logic [5:0]            bk_rd_lane;
+  logic [DW-1:0]         bk_rd_data;
+  logic                  bk_wr_req, bk_wr_gnt;
+  logic [BASE_W-1:0]     bk_wr_beat;
+  logic [5:0]            bk_wr_lane;
+  logic [DW-1:0]         bk_wr_data;
+
   logic                  mig_err_illegal, mig_err_slverr;
   logic [7:0]            mig_err_port;
   logic [31:0]           mig_err_addr;
+
+  hades_arbiter #(
+    .N       (N),
+    .IS_SYNC (IS_SYNC)
+  ) u_arbiter (
+    .ui_clk      (ui_clk),
+    .ui_rst      (ui_rst_soft),
+    .enable      (enable_eff),
+    .period_tick (period_tick),
+    .cfg         (cfg_eff),
+    .rd_vld_i    (pr_rd_vld),
+    .wr_vld_i    (pr_wr_vld),
+    .rd_gnt      (p_rd_gnt),
+    .wr_gnt      (p_wr_gnt),
+    .rd_vld_o    (p_rd_vld),
+    .wr_vld_o    (p_wr_vld)
+  );
 
   hades_mig_if #(
     .N  (N),
@@ -363,8 +444,52 @@ module hades_sram_top
     .err_illegal   (mig_err_illegal),
     .err_slverr    (mig_err_slverr),
     .err_port      (mig_err_port),
-    .err_addr      (mig_err_addr)
+    .err_addr      (mig_err_addr),
+    .bkp_rd_req    (bk_rd_req),
+    .bkp_rd_beat   (bk_rd_beat),
+    .bkp_rd_lane   (bk_rd_lane),
+    .bkp_rd_gnt    (bk_rd_gnt),
+    .bkp_rd_done   (bk_rd_done),
+    .bkp_rd_data   (bk_rd_data),
+    .bkp_wr_req    (bk_wr_req),
+    .bkp_wr_beat   (bk_wr_beat),
+    .bkp_wr_lane   (bk_wr_lane),
+    .bkp_wr_data   (bk_wr_data),
+    .bkp_wr_gnt    (bk_wr_gnt)
   );
+
+  hades_backdoor #(
+    .DW (DW),
+    .AW (AW)
+  ) u_backdoor (
+    .ui_clk      (ui_clk),
+    .ui_rst      (ui_rst_soft),
+    .cfg         (cfg_eff),
+    .cmd_rd      (bkp_cmd_rd),
+    .cmd_wr      (bkp_cmd_wr),
+    .cmd_port    (bkp_cmd_port),
+    .cmd_addr    (bkp_cmd_addr),
+    .cmd_wdata   (bkp_cmd_wdata),
+    .busy        (bkp_busy),
+    .done        (bkp_done),
+    .err         (bkp_err),
+    .rdata       (bkp_rdata_eng),
+    .bkp_rd_req  (bk_rd_req),
+    .bkp_rd_beat (bk_rd_beat),
+    .bkp_rd_lane (bk_rd_lane),
+    .bkp_rd_gnt  (bk_rd_gnt),
+    .bkp_rd_done (bk_rd_done),
+    .bkp_rd_data (bk_rd_data),
+    .bkp_wr_req  (bk_wr_req),
+    .bkp_wr_beat (bk_wr_beat),
+    .bkp_wr_lane (bk_wr_lane),
+    .bkp_wr_data (bk_wr_data),
+    .bkp_wr_gnt  (bk_wr_gnt)
+  );
+
+  // pin-level status mirrors work in both variants
+  assign bkp_rdata = bkp_rdata_eng;
+  assign bkp_ack   = bkp_done;
 
   // ------------------------------------------------------------------
   // Emulated port array
@@ -390,10 +515,10 @@ module hades_sram_top
       .enabled    (enable_eff),
       .ui_clk     (ui_clk),
       .ui_rst     (ui_rst_soft),
-      .rd_vld     (p_rd_vld[i]),
+      .rd_vld     (pr_rd_vld[i]),
       .rd_addr    (p_rd_addr[i]),
       .rd_gnt     (p_rd_gnt[i]),
-      .wr_vld     (p_wr_vld[i]),
+      .wr_vld     (pr_wr_vld[i]),
       .wr_addr    (p_wr_addr[i]),
       .wr_data    (p_wr_data[i]),
       .wr_gnt     (p_wr_gnt[i]),
@@ -564,18 +689,11 @@ module hades_sram_top
   );
 
   // ------------------------------------------------------------------
-  // Backdoor tie-offs (M4)
-  // ------------------------------------------------------------------
-  assign bkp_rdata   = '0;
-  assign bkp_ack     = 1'b0;
-
   // consume not-yet-used inputs
+  // ------------------------------------------------------------------
   logic unused;
   assign unused = &{1'b0,
-                    bkp_req, bkp_we, bkp_port, bkp_addr, bkp_wdata,
                     meas_period[31] /* MEAS read by CSR only when CSR_EN */,
-                    period_tick,                          // M4
-                    cfg_eff.active_ports,                 // M4
                     SELFTEST_EN};                         // M5
 
 endmodule

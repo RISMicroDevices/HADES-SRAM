@@ -78,7 +78,18 @@ module hades_csr
   output          logic         enable,         // effective, interlocked
   output          logic         soft_reset_stb,
   output          logic         port_err_clr,   // 1-cycle pulse, port = port_sel_o
-  output          logic [7:0]   port_sel_o
+  output          logic [7:0]   port_sel_o,
+
+  // backdoor command channel (M4): registers here, engine in hades_backdoor
+  output          logic         bkp_go_rd,      // 1-cycle strobes
+  output          logic         bkp_go_wr,
+  output          logic [7:0]   bkp_port_o,
+  output          logic [39:0]  bkp_addr_o,
+  output          logic [31:0]  bkp_wdata_o,
+  input  wire logic             bkp_busy,
+  input  wire logic             bkp_done,       // 1-cycle strobe from engine
+  input  wire logic             bkp_err,
+  input  wire logic [31:0]      bkp_rdata_i
 );
 
   localparam logic [1:0] AXI_RESP_OKAY = 2'b00;
@@ -100,6 +111,10 @@ module hades_csr
   logic [5:0]                    err_status;      // bits 0..5
   logic [7:0]                    err_port;        // first-error port
   logic [31:0]                   err_addr_q;      // first-error address
+  logic [7:0]                    bkp_port_q;
+  logic [39:0]                   bkp_addr_q;
+  logic [31:0]                   bkp_wdata_q;
+  logic                          bkp_done_stky;   // set by engine, cleared by new cmd
 
   wire logic freq_ok  = clk_running & ~over_freq;
   wire logic allow_en = calib_done & freq_ok;
@@ -162,6 +177,13 @@ module hades_csr
       CSR_PARAMS:          s_axil_rdata = params_word(
                                IS_SYNC ? CLK_MODE_SYNC : CLK_MODE_ASYNC,
                                UI_MHZ, PORT_MB, DW);
+      CSR_BKP_PORT:        s_axil_rdata = {24'd0, bkp_port_q};
+      CSR_BKP_ADDR:        s_axil_rdata = bkp_addr_q[31:0];
+      CSR_BKP_ADDR_HI:     s_axil_rdata = {24'd0, bkp_addr_q[39:32]};
+      CSR_BKP_WDATA:       s_axil_rdata = bkp_wdata_q;
+      CSR_BKP_CMD:         s_axil_rdata = 32'd0;
+      CSR_BKP_RDATA:       s_axil_rdata = bkp_rdata_i;
+      CSR_BKP_STATUS:      s_axil_rdata = {29'd0, bkp_err, bkp_done_stky, bkp_busy};
       default:             s_axil_rdata = 32'd0;
     endcase
   end
@@ -193,6 +215,12 @@ module hades_csr
       err_addr_q      <= 32'd0;
       soft_reset_stb  <= 1'b0;
       port_err_clr    <= 1'b0;
+      bkp_go_rd       <= 1'b0;
+      bkp_go_wr       <= 1'b0;
+      bkp_port_q      <= 8'd0;
+      bkp_addr_q      <= 40'd0;
+      bkp_wdata_q     <= 32'd0;
+      bkp_done_stky   <= 1'b0;
       fb = dflt_base_flat();
       for (i = 0; i < N_MAX; i = i + 1) begin
         port_base_q[i] <= fb[i*BASE_W +: BASE_W];
@@ -223,6 +251,11 @@ module hades_csr
       // ---- pulses default low ----
       soft_reset_stb <= 1'b0;
       port_err_clr   <= 1'b0;
+      bkp_go_rd      <= 1'b0;
+      bkp_go_wr      <= 1'b0;
+
+      // engine completion latches into a pollable flag; a new command clears it
+      if (bkp_done) bkp_done_stky <= 1'b1;
 
       // ---- register writes ----
       if (wr_fire) begin
@@ -276,6 +309,15 @@ module hades_csr
               err_status <= err_status & ~w_d[5:0];
             end
           end
+          CSR_BKP_PORT:    if (w_s[0]) bkp_port_q <= w_d[7:0];
+          CSR_BKP_ADDR:    bkp_addr_q[31:0]  <= apply_wstrb32(bkp_addr_q[31:0], w_d, w_s);
+          CSR_BKP_ADDR_HI: if (w_s[0]) bkp_addr_q[39:32] <= w_d[7:0];
+          CSR_BKP_WDATA:   bkp_wdata_q <= apply_wstrb32(bkp_wdata_q, w_d, w_s);
+          CSR_BKP_CMD:     if (w_s[0]) begin
+            bkp_go_wr     <= w_d[0];
+            bkp_go_rd     <= w_d[1];
+            bkp_done_stky <= 1'b0;
+          end
           default: ;                                     // illegal writes ignored
         endcase
       end
@@ -323,6 +365,10 @@ module hades_csr
   end
 
   assign port_sel_o = port_sel;
+
+  assign bkp_port_o  = bkp_port_q;
+  assign bkp_addr_o  = bkp_addr_q;
+  assign bkp_wdata_o = bkp_wdata_q;
 
 endmodule
 

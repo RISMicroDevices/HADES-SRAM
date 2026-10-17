@@ -13,6 +13,11 @@
 //   ERR_STATUS.bit0.
 // - Writes: posted; WSTRB sub-word lane expansion; B tracked per port for
 //   SLVERR reporting.
+// - Backdoor (M4): an extra lowest-priority requester on both engines
+//   (sel = 8'hFF marker), picked only when no port is eligible — i.e. in
+//   the maintenance window and idle slots.  Backdoor beats/lanes arrive
+//   pre-translated from hades_backdoor; read data returns on bkp_rd_*.
+//   Backdoor traffic counts in stat_tot_* but not in per-port stats.
 // - Outstanding depth 32 (spec: >= 16).
 //-----------------------------------------------------------------------------
 `default_nettype none
@@ -88,8 +93,23 @@ module hades_mig_if
   output          logic                  err_illegal,   // spec bit0
   output          logic                  err_slverr,    // spec bit3
   output          logic [7:0]            err_port,
-  output          logic [31:0]           err_addr
+  output          logic [31:0]           err_addr,
+
+  // backdoor requester (lowest priority; pre-translated beat/lane)
+  input  wire logic                      bkp_rd_req,
+  input  wire logic [BASE_W-1:0]         bkp_rd_beat,
+  input  wire logic [5:0]                bkp_rd_lane,
+  output          logic                  bkp_rd_gnt,
+  output          logic                  bkp_rd_done,
+  output          logic [DW-1:0]         bkp_rd_data,
+  input  wire logic                      bkp_wr_req,
+  input  wire logic [BASE_W-1:0]         bkp_wr_beat,
+  input  wire logic [5:0]                bkp_wr_lane,
+  input  wire logic [DW-1:0]             bkp_wr_data,
+  output          logic                  bkp_wr_gnt
 );
+
+  localparam logic [7:0] BKP_ID = 8'hFF;   // backdoor marker in tracking FIFOs
 
   localparam int SH     = dw_shift(DW);   // addr bits selecting a lane
   localparam int TRK_D  = 32;             // outstanding depth (spec >= 16)
@@ -132,10 +152,13 @@ module hades_mig_if
     assign rd_req_masked[i] = rd_vld[i] & cfg.port_en[i] & enable;
   end
 
-  wire logic        rd_any  = |rd_req_masked;
-  wire logic [7:0]  rd_pick = first_set(rd_req_masked);
+  wire logic        rd_any_ports = |rd_req_masked;
+  wire logic        rd_any  = rd_any_ports | bkp_rd_req;
+  wire logic [7:0]  rd_pick = rd_any_ports ? first_set(rd_req_masked) : BKP_ID;
+  wire logic        rd_pick_bkp = (rd_pick == BKP_ID);
   wire logic [31:0] rd_size_sel = cfg.port_size[rd_pick[5:0]];
-  wire logic        rd_pick_illegal = (32'(rd_addr[rd_pick[5:0]]) >= rd_size_sel);
+  wire logic        rd_pick_illegal = !rd_pick_bkp &&
+                                      (32'(rd_addr[rd_pick[5:0]]) >= rd_size_sel);
 
   // -- read FSM (2-process) --
   always_comb begin
@@ -159,27 +182,32 @@ module hades_mig_if
       rd_beat    <= '0;
       rd_illegal <= 1'b0;
       rd_gnt     <= '0;
+      bkp_rd_gnt <= 1'b0;
       trk_wptr   <= '0;
     end else begin
-      rd_gnt <= '0;
+      rd_gnt     <= '0;
+      bkp_rd_gnt <= 1'b0;
       unique case (rd_state)
         RD_IDLE: begin
           if (rd_any && !trk_full) begin
             rd_sel     <= rd_pick;
             rd_illegal <= rd_pick_illegal;
-            rd_beat    <= cfg.port_base[rd_pick[5:0]]
-                          + BASE_W'(rd_addr[rd_pick[5:0]] >> SH);
+            rd_beat    <= rd_pick_bkp ? bkp_rd_beat
+                          : cfg.port_base[rd_pick[5:0]]
+                            + BASE_W'(rd_addr[rd_pick[5:0]] >> SH);
             rd_state   <= rd_pick_illegal ? RD_SYNTH : RD_ISSUE;
           end
         end
         RD_ISSUE: begin
           if (m_axi_arready) begin
             trk_port [trk_wptr] <= rd_sel;
-            trk_lane [trk_wptr] <= 6'(rd_addr[rd_sel[5:0]] & {{(AW-SH){1'b0}}, {SH{1'b1}}});
+            trk_lane [trk_wptr] <= (rd_sel == BKP_ID) ? bkp_rd_lane
+                                   : 6'(rd_addr[rd_sel[5:0]] & {{(AW-SH){1'b0}}, {SH{1'b1}}});
             trk_ts   [trk_wptr] <= cyc_cnt;
             trk_synth[trk_wptr] <= 1'b0;
             trk_wptr            <= trk_wptr + TPW'(1);
-            rd_gnt[rd_sel[5:0]] <= 1'b1;
+            if (rd_sel == BKP_ID) bkp_rd_gnt        <= 1'b1;
+            else                  rd_gnt[rd_sel[5:0]] <= 1'b1;
             rd_state            <= RD_POP;
           end
         end
@@ -220,16 +248,23 @@ module hades_mig_if
     assign wr_req_masked[i] = wr_vld[i] & cfg.port_en[i] & enable;
   end
 
-  wire logic       wr_any  = |wr_req_masked;
-  wire logic [7:0] wr_pick = first_set(wr_req_masked);
-  wire logic       wr_pick_illegal = (32'(wr_addr[wr_pick[5:0]]) >= cfg.port_size[wr_pick[5:0]]);
+  wire logic       wr_any_ports = |wr_req_masked;
+  wire logic       wr_any  = wr_any_ports | bkp_wr_req;
+  wire logic [7:0] wr_pick = wr_any_ports ? first_set(wr_req_masked) : BKP_ID;
+  wire logic       wr_pick_bkp = (wr_pick == BKP_ID);
+  wire logic       wr_pick_illegal = !wr_pick_bkp &&
+                                     (32'(wr_addr[wr_pick[5:0]]) >= cfg.port_size[wr_pick[5:0]]);
 
-  // lane expansion for the selected write
-  wire logic [5:0]         wr_lane  = 6'(wr_addr[wr_sel[5:0]] & {{(AW-SH){1'b0}}, {SH{1'b1}}});
-  wire logic [511:0]       wr_data512 = 512'(wr_data[wr_sel[5:0]]) << (wr_lane * DW);
+  // lane expansion for the selected write (backdoor supplies its own)
+  wire logic               wr_is_bkp = (wr_sel == BKP_ID);
+  wire logic [5:0]         wr_lane  = wr_is_bkp ? bkp_wr_lane
+                                      : 6'(wr_addr[wr_sel[5:0]] & {{(AW-SH){1'b0}}, {SH{1'b1}}});
+  wire logic [DW-1:0]      wr_dsel  = wr_is_bkp ? bkp_wr_data : wr_data[wr_sel[5:0]];
+  wire logic [511:0]       wr_data512 = 512'(wr_dsel) << (wr_lane * DW);
   wire logic [63:0]        wr_strb64  = (64'({64{1'b1}}) >> (64 - DW/8)) << (wr_lane * (DW/8));
-  wire logic [BASE_W-1:0]  wr_beat  = cfg.port_base[wr_sel[5:0]]
-                                      + BASE_W'(wr_addr[wr_sel[5:0]] >> SH);
+  wire logic [BASE_W-1:0]  wr_beat  = wr_is_bkp ? bkp_wr_beat
+                                      : cfg.port_base[wr_sel[5:0]]
+                                        + BASE_W'(wr_addr[wr_sel[5:0]] >> SH);
   wire logic               wr_illegal;
 
   // write tracking (for B-channel SLVERR attribution)
@@ -251,7 +286,8 @@ module hades_mig_if
     end
   end
 
-  assign wr_illegal = (32'(wr_addr[wr_sel[5:0]]) >= cfg.port_size[wr_sel[5:0]]);
+  assign wr_illegal = (wr_sel != BKP_ID) &&
+                      (32'(wr_addr[wr_sel[5:0]]) >= cfg.port_size[wr_sel[5:0]]);
 
   // write completes when both AW and W have been accepted
   wire logic wr_push = (wr_state == WR_ISSUE) && !wr_illegal &&
@@ -265,9 +301,11 @@ module hades_mig_if
       aw_done    <= 1'b0;
       w_done     <= 1'b0;
       wr_gnt     <= '0;
+      bkp_wr_gnt <= 1'b0;
       wtrk_wptr  <= '0;
     end else begin
-      wr_gnt <= '0;
+      wr_gnt     <= '0;
+      bkp_wr_gnt <= 1'b0;
       unique case (wr_state)
         WR_IDLE: begin
           if (wr_any && !wtrk_full) begin
@@ -287,7 +325,8 @@ module hades_mig_if
             if (wr_push) begin
               wtrk_port[wtrk_wptr] <= wr_sel;
               wtrk_wptr            <= wtrk_wptr + TPW'(1);
-              wr_gnt[wr_sel[5:0]]  <= 1'b1;
+              if (wr_is_bkp) bkp_wr_gnt        <= 1'b1;
+              else           wr_gnt[wr_sel[5:0]] <= 1'b1;
               wr_state             <= WR_POP;
             end
           end
@@ -309,6 +348,7 @@ module hades_mig_if
   // Read-response routing (track FIFO head; synthetic entries pop immediately)
   // =========================================================================
   wire logic        head_synth = trk_synth[trk_rptr];
+  wire logic        head_bkp   = (trk_port[trk_rptr] == BKP_ID);
   wire logic        pop_synth  = !trk_empty && head_synth;
   wire logic        pop_real   = !trk_empty && !head_synth && m_axi_rvalid;
   wire logic [7:0]  head_port  = trk_port[trk_rptr];
@@ -319,19 +359,27 @@ module hades_mig_if
 
   always_ff @(posedge ui_clk) begin
     if (ui_rst) begin
-      trk_rptr <= '0;
-      rsp_vld  <= '0;
-      rsp_data <= '0;
+      trk_rptr    <= '0;
+      rsp_vld     <= '0;
+      rsp_data    <= '0;
+      bkp_rd_done <= 1'b0;
+      bkp_rd_data <= '0;
     end else begin
-      rsp_vld <= '0;
+      rsp_vld     <= '0;
+      bkp_rd_done <= 1'b0;
       if (pop_synth) begin
         trk_rptr <= trk_rptr + TPW'(1);
         rsp_vld [head_port[5:0]] <= 1'b1;
         rsp_data[head_port[5:0]] <= '0;   // illegal-address read returns 0
       end else if (pop_real) begin
         trk_rptr <= trk_rptr + TPW'(1);
-        rsp_vld [head_port[5:0]] <= 1'b1;
-        rsp_data[head_port[5:0]] <= DW'(m_axi_rdata >> (head_lane * DW));
+        if (head_bkp) begin
+          bkp_rd_done <= 1'b1;
+          bkp_rd_data <= DW'(m_axi_rdata >> (head_lane * DW));
+        end else begin
+          rsp_vld [head_port[5:0]] <= 1'b1;
+          rsp_data[head_port[5:0]] <= DW'(m_axi_rdata >> (head_lane * DW));
+        end
       end
     end
   end
@@ -383,10 +431,11 @@ module hades_mig_if
       err_illegal <= 1'b0;
       err_slverr  <= 1'b0;
 
-      // read issue
+      // read issue (totals include the backdoor; per-port stats exclude it)
       if (rd_state == RD_ISSUE && m_axi_arvalid && m_axi_arready) begin
         stat_tot_rd <= stat_tot_rd + 64'd1;
-        port_stat_rd[rd_sel[5:0]] <= port_stat_rd[rd_sel[5:0]] + 32'd1;
+        if (rd_sel != BKP_ID)
+          port_stat_rd[rd_sel[5:0]] <= port_stat_rd[rd_sel[5:0]] + 32'd1;
       end
       // illegal read detected at arbitration
       if (rd_state == RD_IDLE && rd_any && !trk_full && rd_pick_illegal) begin
@@ -400,7 +449,8 @@ module hades_mig_if
           (aw_done || (m_axi_awvalid && m_axi_awready)) &&
           (w_done  || (m_axi_wvalid  && m_axi_wready))) begin
         stat_tot_wr <= stat_tot_wr + 64'd1;
-        port_stat_wr[wr_sel[5:0]] <= port_stat_wr[wr_sel[5:0]] + 32'd1;
+        if (wr_sel != BKP_ID)
+          port_stat_wr[wr_sel[5:0]] <= port_stat_wr[wr_sel[5:0]] + 32'd1;
       end
       if (wr_state == WR_ISSUE && wr_illegal) begin
         err_illegal <= 1'b1;
@@ -411,17 +461,19 @@ module hades_mig_if
       // read response latency
       if (pop_real && head_age > stat_maxlat)
         stat_maxlat <= head_age;
-      // SLVERR on read or write channels
+      // SLVERR on read or write channels (backdoor: port field = 8'hFF)
       if (pop_real && m_axi_rresp != 2'b00) begin
         err_slverr <= 1'b1;
         err_port   <= head_port;
-        port_stat_err[head_port[5:0]] <= port_stat_err[head_port[5:0]] + 32'd1;
+        if (!head_bkp)
+          port_stat_err[head_port[5:0]] <= port_stat_err[head_port[5:0]] + 32'd1;
       end
       if (m_axi_bvalid && m_axi_bresp != 2'b00) begin
         err_slverr <= 1'b1;
         err_port   <= wtrk_port[wtrk_rptr];
-        port_stat_err[wtrk_port[wtrk_rptr][5:0]] <=
-            port_stat_err[wtrk_port[wtrk_rptr][5:0]] + 32'd1;
+        if (wtrk_port[wtrk_rptr] != BKP_ID)
+          port_stat_err[wtrk_port[wtrk_rptr][5:0]] <=
+              port_stat_err[wtrk_port[wtrk_rptr][5:0]] + 32'd1;
       end
       // per-port error counter clear from CSR indexed window
       if (err_clr && err_clr_port < 8'(N_MAX))

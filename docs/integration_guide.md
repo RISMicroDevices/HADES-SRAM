@@ -1,6 +1,6 @@
 # HADES-SRAM Integration Guide
 
-Status: **M3 done** (sections marked [*M-later*] are filled by the named milestone).
+Status: **M4 done** (sections marked [*M-later*] are filled by the named milestone).
 
 ## 1. Overview
 
@@ -57,9 +57,11 @@ Feasibility is enforced at elaboration (T11); N=128 @ 500 KHz is unreachable on 
 
 VU9P = 3 SLRs; all IP logic + MIG C0 constrained to SLR2 pblock; per-port local registering in `hades_port`; XDMA→CSR path may cross SLRs (pipelined).
 
-## 7. Backdoor content load/readout [*M4*]
+## 7. Backdoor content load/readout
 
-64 ports × 16 MiB full initialization estimate: 64 × 2^18 beats ≈ 16.8 M AXI beats ≈ 56 ms of bus time at full rate; at maintenance-window-only insertion (≈10% duty) ≈ 0.6 s. (Estimate; confirmed in M4.)
+CSR `BKP_*` registers (CSR_EN=1) or the `bkp_*` pins (CSR_EN=0) drive `hades_backdoor`, a lowest-priority requester on the backend engines: it is served only when no port is eligible — the maintenance window and idle slots — so it never disturbs the per-port latency contract (T9). It works while the IP is disabled, which is how the 64 images are loaded before ENABLE. Register semantics in `csr/csr_regmap.md`.
+
+64 ports × 16 MiB full initialization: 64 × 2^18 beats ≈ 16.8 M AXI beats ≈ 56 ms of backend bus time at full rate; the backdoor is additionally throttled by arbitration (maintenance windows + idle slots), so budget ≈ 0.1–0.2 s at 500 KHz with no target traffic — minutes are not needed. (Sim-verified mechanism in M4; hardware number confirmed at A3.)
 
 ## 8. Known limitations
 
@@ -75,7 +77,7 @@ VU9P = 3 SLRs; all IP logic + MIG C0 constrained to SLR2 pblock; per-port local 
 | M1 (done) | Skeleton: pkg/CDC/freq-mon/CSR, empty datapath, CSR_EN variants | T6-basic, static smoke, bounds |
 | M2 (done) | Full per-port datapath: hades_port (CDC: Gray-FIFO + quasi-static slots), timing shaper (L=1/2, back-to-back), mig_if (FCFS AXI4 engine, 32-deep outstanding, sub-word lanes, stats + illegal/SLVERR/drop errors), AXI4 MIG model with refresh/periodic-read/ZQCS occupancy | T1 (1e5 ops), T2 (L=1/2 exact), T13a-lite — SYNC+ASYNC, CSR+static, VCS+xsim |
 | M3 (done) | Refresh/ZQCS scheduling (window-geared debt scheduler, period tick), determinism guards; model maintenance now request-driven (+MAINT_STRESS / +RD_LAT_ADD knobs) | T2(L=1), T3 (+stress), T11 (5 legs), T14 — SYNC+ASYNC, CSR+static, VCS+xsim |
-| M4 | TDMA arbiter, N=8→32→64, backdoor | T4, T5, T7, T9, T11 |
+| M4 (done) | TDMA arbiter (static slot table, eligibility latches), backdoor (CSR + pins, lowest-priority requester), CFG_PORTS gear gating; T7 ASYNC phase walk + ±0.5% drift | T4 (64/32/16/8 + L=1), T5, T7 (100/500 KHz), T9, T11 — SYNC+ASYNC, CSR+static, VCS+xsim |
 | M5 | Hardening, coverage, VCU1525 acceptance, IP package | T8–T13, A1–A10 |
 
 ## 10. VCU1525 hardware spike (2026-10-17)

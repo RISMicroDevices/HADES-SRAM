@@ -49,9 +49,21 @@ Port-level registers never flatten into the address space. Write `PORT_SEL` firs
 | 0x34 | `PORT_STAT_WR` | RO | 0 | Selected port write count |
 | 0x38 | `PORT_STAT_ERR` | RO/W1C | 0 | Selected port error count (illegal addr / timeout / SLVERR); any write clears it |
 
-## Backdoor channel (M4)
+## Backdoor channel
 
-Offsets reserved now; semantics in `docs/integration_guide.md`: `BKP_PORT` 0x90, `BKP_ADDR` 0x94 / `BKP_ADDR_HI` 0x98, `BKP_WDATA` 0x9C, `BKP_CMD` 0xA0, `BKP_RDATA` 0xA4, `BKP_STATUS` 0xA8. Backdoor accesses insert only into maintenance/idle slots at lowest arbitration priority.
+Host-side content load/readout without the target ports (spec §3.3). The engine (`hades_backdoor`) translates `port`+word-address exactly like a port access and enters the backend as the **lowest-priority requester** — it is served only in the maintenance window and idle slots, so in-flight target traffic never feels it (T9 checks `ERR_STATUS` stays 0 under concurrent backdoor+traffic). It works while the IP is disabled (pre-ENABLE initialization). Backdoor traffic counts in `STAT_TOT_*` but not in per-port stats; backdoor errors do not set `ERR_STATUS` bits.
+
+| Offset | Name | Acc | Reset | Description |
+|---|---|---|---|---|
+| 0x90 | `BKP_PORT` | RW | 0 | Backdoor target port (0 … N_MAX-1) |
+| 0x94 | `BKP_ADDR` | RW | 0 | Backdoor word address bits [31:0], in **DW-bit words** within the port |
+| 0x98 | `BKP_ADDR_HI` | RW | 0 | Backdoor word address bits [39:32] |
+| 0x9C | `BKP_WDATA` | RW | 0 | Backdoor write data (32-bit; for DW=64 only the low half of each word is reachable) |
+| 0xA0 | `BKP_CMD` | WO | — | bit0 = write trigger, bit1 = read trigger (self-clearing strobes; clears `BKP_STATUS.done`) |
+| 0xA4 | `BKP_RDATA` | RO | 0 | Backdoor read result, valid when `BKP_STATUS.done` |
+| 0xA8 | `BKP_STATUS` | RO | 0 | bit0 busy, bit1 done (sticky until the next command), bit2 error — port ≥ N_MAX or address ≥ `PORT_SIZE`; an illegal command completes immediately with no AXI traffic |
+
+Command sequence: write `BKP_PORT`/`BKP_ADDR`/`BKP_WDATA` → write `BKP_CMD` → poll `BKP_STATUS.done` (or wait for the `bkp_ack` pin on the static variant) → read `BKP_RDATA` on reads. Commands issued while busy are ignored. Static variant: drive `bkp_port/addr/wdata/we` and pulse `bkp_req` (hold until `bkp_ack`); the static pins have no error flag — an illegal access acks immediately with undefined `bkp_rdata`.
 
 # Static variant (CSR_EN=0) — parameters instead of registers
 
@@ -67,6 +79,6 @@ With `CSR_EN=0` there is no bus interface. The whole configuration is hard-wired
 | `P_PORT_BASE` | equal 16 MiB partitions | `PORT_BASE[+HI]` per port | **flat packed vector** `[N_MAX*34-1:0]`; port i = bits `[i*34 +: 34]`; 512-bit-beat units; fully user-overridable per port |
 | `P_PORT_SIZE` | 2^22 per port | `PORT_SIZE` per port | flat packed vector `[N_MAX*32-1:0]`; port i = bits `[i*32 +: 32]`; **DW-bit word** units (2^22 = 16 MiB at DW=32) |
 
-Status is exposed on pins instead of a bus: `stat_calib_done`, `stat_ready`, `stat_refresh_active`, `stat_zq_active`, `stat_err[7:0]` (level-style mirror of `ERR_STATUS[5:0]`; bit4 = enable withheld because the clock is stopped/over-freq). A pin-level backdoor port (`bkp_req/we/port/addr/wdata/rdata/ack`) keeps content load/readout possible without a bus (M4).
+Status is exposed on pins instead of a bus: `stat_calib_done`, `stat_ready`, `stat_refresh_active`, `stat_zq_active`, `stat_err[7:0]` (level-style mirror of `ERR_STATUS[5:0]`; bit4 = enable withheld because the clock is stopped/over-freq). A pin-level backdoor port (`bkp_req/we/port/addr/wdata/rdata/ack`) keeps content load/readout possible without a bus: hold the fields stable, raise `bkp_req` until `bkp_ack` pulses, then drop it; reads return `bkp_rdata` with the ack.
 
 Flat vectors are used (not SV array parameters) because they elaborate identically in VCS, xelab, Vivado synthesis, and survive the Vivado IP packager GUI.

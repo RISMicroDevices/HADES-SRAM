@@ -1,20 +1,22 @@
 //-----------------------------------------------------------------------------
-// HADES-SRAM — SV testbench harness (M2).
+// HADES-SRAM — SV testbench harness (M4).
 // Pin-level protocol here (dual clocks, resets, AXI4-Lite BFM, SRAM port
 // drivers/monitors, MIG model wiring); test intent in sim/cpp/hades_tb.cpp
 // via DPI-C (expected memory, exact-latency due-cycle queues, accounting).
 //
 // Build variants (+define+):
-//   (none)                 CSR_EN=1, SYNC    TEST=all_csr (t6_csr,t1,t2,t3,t13a)
-//   ASYNC                  CSR_EN=1, ASYNC   TEST=all_csr
-//   CSR_STATIC             CSR_EN=0, SYNC    TEST=all_static (static,t3)
+//   (none)                 CSR_EN=1, SYNC    TEST=all_csr
+//                          (t6_csr,t1,t2,t3,t4,t5,t7,t9,t13a)
+//   ASYNC                  CSR_EN=1, ASYNC   TEST=all_csr (t7 walks phase)
+//   CSR_STATIC             CSR_EN=0, SYNC    TEST=all_static (static,t3,t9)
 //   CSR_STATIC+PARAM_OVRD  CSR_EN=0, SYNC, user P_PORT_BASE/SIZE overrides
 // Dedicated runs (not in all_*): TEST=t3 +MAINT_STRESS=1 (worst-case
-// maintenance alignment), TEST=t14 +RD_LAT_ADD=<n> (bit5 sentinel fault).
+// maintenance alignment), TEST=t14 +RD_LAT_ADD=1500 (bit5 sentinel fault).
 //
 // Clocks: ui_clk 300 MHz.  SYNC: port_clk derived from ui_clk by integer
 // divider (same-source).  ASYNC: independent realtime generator,
-// incommensurate 499.983 KHz by default.
+// incommensurate 499.983 KHz by default; T7 adds a phase walk (~4.9 deg
+// steps) and +-0.5% slow drift.
 //-----------------------------------------------------------------------------
 `timescale 1ns/1ps
 `default_nettype none
@@ -68,15 +70,43 @@ module tb_hades_top;
   bit   pc_run = 1'b1;
   logic port_clk = 1'b0;
 
+  // current gear's base half period (ns); used by the T7 phase walk/drift
+  realtime gear_half_ns;
+  initial gear_half_ns = 1000.034;   // 500 KHz gear (also SYNC divider base)
+
 `ifdef ASYNC
-  // independent incommensurate source: 499.983 KHz (period 2000.068 ns)
+  // independent incommensurate source: 499.983 KHz (period 2000.068 ns).
+  // T7 phase walk: pc_shift_ns is a one-shot phase nudge (<= 5 deg of the
+  // period per step) applied to the next half period; drift walks pc_half_ns
+  // around gear_half_ns within +-0.5%.
   realtime pc_half_ns;
+  realtime pc_shift_ns = 0.0;
   initial pc_half_ns = 1000.034;
-  always begin
-    #(pc_half_ns);
+  always begin : g_pclk
+    realtime h;
+    h = pc_half_ns + pc_shift_ns;
+    pc_shift_ns = 0.0;
+    #(h);
     if (pc_run) port_clk = ~port_clk;
   end
-  task automatic port_clk_set_khz(input int khz); pc_half_ns = 500000.0 / khz; endtask
+  task automatic port_clk_set_khz(input int khz);
+    gear_half_ns = 500000.0 / khz;
+    pc_half_ns   = gear_half_ns;
+  endtask
+
+  bit      phase_walk_en = 1'b0;
+  realtime drift         = 0.0;
+  int      drift_dir     = 1;
+  always begin : g_walk
+    repeat (3) @(posedge port_clk);
+    if (phase_walk_en) begin
+      pc_shift_ns = gear_half_ns * 0.049;   // ~4.9 deg step (<= 5 deg)
+      if (drift_dir) drift = drift + 0.0004; else drift = drift - 0.0004;
+      if (drift >  0.005) begin drift =  0.005; drift_dir = 0; end
+      if (drift < -0.005) begin drift = -0.005; drift_dir = 1; end
+      pc_half_ns = gear_half_ns * (1.0 + drift);
+    end
+  end
 `else
   // SYNC: integer divider from ui_clk (same-source, like an MMCM output)
   int pc_div = 600;      // ui cycles per port period; 600 => 500 KHz
@@ -92,7 +122,10 @@ module tb_hades_top;
       pc_cnt   <= pc_cnt + 1;
     end
   end
-  task automatic port_clk_set_khz(input int khz); pc_div = 300_000 / khz; endtask
+  task automatic port_clk_set_khz(input int khz);
+    pc_div       = 300_000 / khz;
+    gear_half_ns = 500000.0 / khz;
+  endtask
 `endif
 
   task automatic port_clk_stop();  begin pc_run = 1'b0; port_clk = 1'b0; end endtask
@@ -135,6 +168,14 @@ module tb_hades_top;
 
   // DUT <-> model maintenance handshake
   logic        ref_req, ref_ack, zq_req, zq_ack;
+
+  // pin-level backdoor (used in CSR_STATIC builds; tied off otherwise)
+  logic                      bkp_req_t = 1'b0, bkp_we_t = 1'b0;
+  logic [7:0]                bkp_port_t = 8'd0;
+  logic [BASE_W-1:0]         bkp_addr_t = '0;
+  logic [DW_DEFAULT-1:0]     bkp_wdata_t = '0;
+  logic [DW_DEFAULT-1:0]     bkp_rdata_t;
+  logic                      bkp_ack_t;
 
   // T14: set while fault-injected late responses are expected; gates the
   // rdata X/mismatch checks (rvalid must still assert on schedule)
@@ -240,13 +281,13 @@ module tb_hades_top;
     .stat_refresh_active(stat_refresh_active),
     .stat_zq_active     (stat_zq_active),
     .stat_err           (stat_err),
-    .bkp_req    (1'b0),
-    .bkp_we     (1'b0),
-    .bkp_port   (8'd0),
-    .bkp_addr   ('0),
-    .bkp_wdata  ('0),
-    .bkp_rdata  (),
-    .bkp_ack    ()
+    .bkp_req    (bkp_req_t),
+    .bkp_we     (bkp_we_t),
+    .bkp_port   (bkp_port_t),
+    .bkp_addr   (bkp_addr_t),
+    .bkp_wdata  (bkp_wdata_t),
+    .bkp_rdata  (bkp_rdata_t),
+    .bkp_ack    (bkp_ack_t)
   );
 
   assign ui_rst = ~ui_rst_n;
@@ -477,25 +518,35 @@ module tb_hades_top;
     end
   endtask
 
+  // Default flat address map for all ports.  T6 writes a custom map and T1
+  // shrinks PORT_SIZE for error tests — every traffic phase must start from
+  // the default flat map.
+  task automatic csr_default_map();
+    begin
+      for (int p = 0; p < N_MAX; p++) begin
+        axil_wr(CSR_PORT_SEL, 32'(p));
+        axil_wr(CSR_PORT_BASE, 32'(p * 32'h0004_0000));  // i * 2^18 beats
+        axil_wr(CSR_PORT_BASE_HI, 32'd0);
+        axil_wr(CSR_PORT_SIZE, 32'h0040_0000);           // 16 MiB in DW32 words
+      end
+    end
+  endtask
+
   // CSR helper: program L and enable mask, wait for ready.
   // The frequency monitor must observe a running, legal port_clk first
   // (spec init sequence: check MEAS_PERIOD before ENABLE; 4-period average
-  // is valid after 5 edges).  Also normalize the address map of the test
-  // ports (previous phases may have shrunk PORT_SIZE for error tests).
-  task automatic csr_enable(input int lat, input longint en_mask);
+  // is valid after 5 edges).  n_active programs CFG_PORTS (arbiter
+  // slot-table extent).
+  task automatic csr_enable(input int lat, input longint en_mask,
+                            input int n_active = N_MAX);
     logic [31:0] rd;
     begin
       axil_wr(CSR_CTRL, 32'h0);
       axil_wr(CSR_CFG_LATENCY, 32'(lat));
       axil_wr(CSR_PORT_EN_LO, 32'(en_mask));
       axil_wr(CSR_PORT_EN_HI, 32'(en_mask >> 32));
-      axil_wr(CSR_CFG_PORTS, 32'(N_MAX));
-      for (int p = 0; p < 2; p++) begin
-        axil_wr(CSR_PORT_SEL, 32'(p));
-        axil_wr(CSR_PORT_BASE, 32'(p * 32'h0004_0000));  // i * 2^18 beats
-        axil_wr(CSR_PORT_BASE_HI, 32'd0);
-        axil_wr(CSR_PORT_SIZE, 32'h0040_0000);           // 16 MiB in DW32 words
-      end
+      axil_wr(CSR_CFG_PORTS, 32'(n_active));
+      csr_default_map();
       repeat (6) @(posedge port_clk);   // let freq_mon measure the clock
       axil_wr(CSR_CTRL, 32'h1);
       axil_rd(CSR_STATUS, rd);
@@ -849,6 +900,313 @@ module tb_hades_top;
   endtask
 
   // ------------------------------------------------------------------
+  // Backdoor access helpers (CSR register channel / static pin channel)
+  // ------------------------------------------------------------------
+`ifndef CSR_STATIC
+  task automatic bkp_wr(input int port, input int unsigned addr,
+                        input int unsigned d, output logic [31:0] st);
+    begin
+      axil_wr(CSR_BKP_PORT, 32'(port));
+      axil_wr(CSR_BKP_ADDR, addr);
+      axil_wr(CSR_BKP_ADDR_HI, 32'd0);
+      axil_wr(CSR_BKP_WDATA, d);
+      axil_wr(CSR_BKP_CMD, 32'h1);
+      st = 32'h0;
+      for (int t = 0; t < 400; t++) begin
+        axil_rd(CSR_BKP_STATUS, st);
+        if (st[1]) break;
+      end
+      hades_check_eq("bkp_wr done seen", st & 32'h2, 32'h2);
+    end
+  endtask
+
+  task automatic bkp_rd(input int port, input int unsigned addr,
+                        output logic [31:0] d, output logic [31:0] st);
+    begin
+      axil_wr(CSR_BKP_PORT, 32'(port));
+      axil_wr(CSR_BKP_ADDR, addr);
+      axil_wr(CSR_BKP_ADDR_HI, 32'd0);
+      axil_wr(CSR_BKP_CMD, 32'h2);
+      st = 32'h0;
+      for (int t = 0; t < 400; t++) begin
+        axil_rd(CSR_BKP_STATUS, st);
+        if (st[1]) break;
+      end
+      hades_check_eq("bkp_rd done seen", st & 32'h2, 32'h2);
+      axil_rd(CSR_BKP_RDATA, d);
+    end
+  endtask
+`else
+  task automatic bkp_pin(input bit we, input int port, input int unsigned addr,
+                         input int unsigned wd, output logic [31:0] rd);
+    begin
+      @(posedge ui_clk);
+      bkp_port_t  <= 8'(port);
+      bkp_addr_t  <= BASE_W'(addr);
+      bkp_wdata_t <= wd;
+      bkp_we_t    <= we;
+      bkp_req_t   <= 1'b1;
+      forever begin
+        @(posedge ui_clk);
+        if (bkp_ack_t) break;
+      end
+      @(posedge ui_clk);
+      bkp_req_t <= 1'b0;
+      rd = bkp_rdata_t;
+      repeat (4) @(posedge ui_clk);   // let the engine return to idle
+    end
+  endtask
+`endif
+
+  // ------------------------------------------------------------------
+  // T4 driver: one pseudo-random access per enabled port per target period
+  // (en held 1 across the run).  Single driver process with per-port
+  // xorshift state -> identical stimulus on VCS and xsim.
+  // ------------------------------------------------------------------
+  task automatic t4_run(input int n_ports, input int n_per);
+    int unsigned rs[N_MAX];
+    int unsigned a, d, w;
+    begin
+      for (int p = 0; p < n_ports; p++)
+        rs[p] = (32'h9E37_79B9 ^ (32'(p) * 32'h0101_0101)) | 32'h1;
+      for (int k = 0; k < n_per; k++) begin
+        @(negedge port_clk);
+        for (int p = 0; p < n_ports; p++) begin
+          rs[p] ^= rs[p] << 13; rs[p] ^= rs[p] >> 17; rs[p] ^= rs[p] << 5;
+          a = rs[p] & ((32'h1 << 22) - 1);
+          rs[p] ^= rs[p] << 13; rs[p] ^= rs[p] >> 17; rs[p] ^= rs[p] << 5;
+          d = rs[p];
+          rs[p] ^= rs[p] << 13; rs[p] ^= rs[p] >> 17; rs[p] ^= rs[p] << 5;
+          w = rs[p] & 32'h1;
+          sram_en[p]    <= 1'b1;
+          sram_we[p]    <= 1'(w[0]);
+          sram_addr[p]  <= a;
+          sram_wdata[p] <= d;
+          if (w[0]) hades_mem_write(p, a, d);
+          else      hades_read_expect(p, pcycle + 1 + cur_lat, a);
+        end
+      end
+      @(negedge port_clk);
+      for (int p = 0; p < n_ports; p++) sram_en[p] <= 1'b0;
+    end
+  endtask
+
+  // ------------------------------------------------------------------
+  // T4: full-port-load concurrency — all enabled ports access every period;
+  // data correct, per-port latency exact (scoreboard), ERR_STATUS.bit2 == 0.
+  // Gears 64/32/16/8 via CFG_PORTS + PORT_EN; plus L=1 at full load.
+  // ------------------------------------------------------------------
+  task automatic test_t4();
+    logic [31:0] rd;
+    int          k;
+    begin
+      hades_log("--- T4: full-load concurrency, gears 64/32/16/8 + L=1 ---");
+      calib_done = 1'b1;
+      for (int g = 0; g < 4; g++) begin
+        k = 64 >> g;
+        csr_enable(2, {64{1'b1}} >> (64 - k), k);
+        t4_run(k, 32);
+        drain();
+        axil_rd(CSR_ERR_STATUS, rd);
+        hades_check_eq($sformatf("T4 gear N=%0d: ERR_STATUS clean", k),
+                       rd & 32'h3F, 0);
+      end
+      csr_enable(1, {64{1'b1}}, 64);   // L=1 at full load
+      t4_run(64, 32);
+      drain();
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("T4 N=64 L=1: ERR_STATUS clean", rd & 32'h3F, 0);
+      axil_wr(CSR_CTRL, 32'h0);
+    end
+  endtask
+
+  // ------------------------------------------------------------------
+  // T5: read-after-write mix — every port writes address X at one period
+  // and reads X back at the next (adjacent periods), 64 ports in parallel
+  // ------------------------------------------------------------------
+  task automatic test_t5();
+    int unsigned a, d;
+    logic [31:0] rd;
+    begin
+      hades_log("--- T5: RAW mix, 64 ports ---");
+      calib_done = 1'b1;
+      csr_enable(2, {64{1'b1}}, 64);
+      for (int k = 0; k < 32; k++) begin
+        @(negedge port_clk);
+        for (int p = 0; p < N_MAX; p++) begin
+          a = 32'h0001_0000 + 32'(k);
+          d = 32'h5A00_0000 ^ (32'(p) << 16) ^ 32'(k);
+          sram_en[p] <= 1'b1; sram_we[p] <= 1'b1;
+          sram_addr[p] <= a; sram_wdata[p] <= d;
+          hades_mem_write(p, a, d);
+        end
+        @(negedge port_clk);
+        for (int p = 0; p < N_MAX; p++) begin
+          a = 32'h0001_0000 + 32'(k);
+          sram_en[p] <= 1'b1; sram_we[p] <= 1'b0; sram_addr[p] <= a;
+          hades_read_expect(p, pcycle + 1 + cur_lat, a);   // RAW: new data
+        end
+      end
+      @(negedge port_clk);
+      for (int p = 0; p < N_MAX; p++) sram_en[p] <= 1'b0;
+      drain();
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("T5: ERR_STATUS clean", rd & 32'h3F, 0);
+      axil_wr(CSR_CTRL, 32'h0);
+    end
+  endtask
+
+  // ------------------------------------------------------------------
+  // T7: frequency gears 100/500 KHz with T2+T4 subsets at each gear.
+  // SYNC: same-source divider switch.  ASYNC: also enables the phase walk
+  // (~4.9 deg steps) and +-0.5% slow drift for the whole test.
+  // CFG_MIN_PERIOD is relaxed to 590 so -0.5% drift at the 500 KHz gear
+  // (period 597) does not trip the over-freq interlock.
+  // ------------------------------------------------------------------
+  task automatic test_t7();
+    logic [31:0] rd;
+    int          khz;
+    begin
+      hades_log("--- T7: gears 100/500 KHz (+ ASYNC phase walk/drift) ---");
+      calib_done = 1'b1;
+      axil_wr(CSR_CTRL, 32'h0);
+      axil_wr(CSR_CFG_MIN_PERIOD, 32'd590);
+`ifdef ASYNC
+      phase_walk_en = 1'b1;
+`endif
+      for (int g = 0; g < 2; g++) begin
+        khz = (g == 0) ? 100 : 500;
+        hades_log($sformatf("T7 gear: %0d KHz", khz));
+        port_clk_set_khz(khz);
+        repeat (8) @(posedge port_clk);   // freq_mon re-measures the new gear
+        csr_enable(2, 64'hF, 4);
+        sram_write_burst(0, 32, 32'h6000, 32'h7700_0000);
+        sram_write_burst(1, 32, 32'h7000, 32'h0077_0000);
+        drain();
+        sram_read_burst(0, 32, 32'h6000);
+        sram_read_burst(1, 32, 32'h7000);
+        drain();
+        t4_run(4, 24);
+        drain();
+        axil_rd(CSR_ERR_STATUS, rd);
+        hades_check_eq($sformatf("T7 %0d KHz: ERR_STATUS clean", khz),
+                       rd & 32'h3F, 0);
+        axil_wr(CSR_CTRL, 32'h0);
+      end
+`ifdef ASYNC
+      phase_walk_en = 1'b0;
+      drift         = 0.0;
+      port_clk_set_khz(500);
+`endif
+      axil_wr(CSR_CFG_MIN_PERIOD, 32'(TARGET_PERIOD_500K));   // restore 600
+    end
+  endtask
+
+  // ------------------------------------------------------------------
+  // T9: backdoor channel
+  //  A: pre-ENABLE init of all 64 ports through the backdoor, read back
+  //     through the target domain
+  //  B: backdoor concurrent with live traffic — T2 exactness unaffected,
+  //     backdoor data correct; disjoint scratch regions, so no races
+  //  C: illegal backdoor address completes with err, no hang, no datapath
+  //     error
+  // ------------------------------------------------------------------
+`ifndef CSR_STATIC
+  task automatic test_t9();
+    logic [31:0] rd, d, st;
+    begin
+      hades_log("--- T9: backdoor channel ---");
+      calib_done = 1'b1;
+      axil_wr(CSR_CTRL, 32'h0);
+      csr_default_map();      // phase A runs pre-ENABLE; do not rely on order
+
+      for (int p = 0; p < N_MAX; p++) begin
+        for (int w = 0; w < 4; w++) begin
+          int unsigned a, dd;
+          a  = 32'h0002_0000 + 32'(w);
+          dd = 32'hB100_0000 ^ (32'(p) << 8) ^ 32'(w);
+          bkp_wr(p, a, dd, st);
+          if (st[2]) hades_fail($sformatf("bkp_wr init err port %0d", p));
+          hades_mem_write(p, a, dd);
+        end
+      end
+
+      csr_enable(2, {64{1'b1}}, 64);
+      for (int p = 0; p < N_MAX; p++)
+        for (int w = 0; w < 4; w++)
+          sram_read(p, 32'h0002_0000 + 32'(w));
+      drain();
+
+      fork
+        begin
+          sram_write_burst(0, 48, 32'h0800, 32'h0800_0000);
+          sram_read_burst(0, 48, 32'h0800);
+        end
+        begin
+          sram_write_burst(1, 48, 32'h0900, 32'h0900_0000);
+          sram_read_burst(1, 48, 32'h0900);
+        end
+        begin
+          for (int p = 4; p < 12; p++) begin
+            int unsigned a, dd;
+            a  = 32'h0003_0000 + 32'(p);
+            dd = 32'hCAFE_0000 ^ 32'(p);
+            bkp_wr(p, a, dd, st);
+            if (st[2]) hades_fail($sformatf("bkp_wr err port %0d", p));
+            hades_mem_write(p, a, dd);
+            bkp_rd(p, a, d, st);
+            if (st[2]) hades_fail($sformatf("bkp_rd err port %0d", p));
+            hades_check_eq($sformatf("bkp readback port %0d", p), d, dd);
+          end
+        end
+      join
+      drain();
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("T9: ERR_STATUS clean (backdoor invisible)", rd & 32'h3F, 0);
+
+      bkp_rd(0, 32'h0040_0000, d, st);   // == PORT_SIZE: illegal
+      hades_check_eq("T9: illegal bkp addr -> done+err", st & 32'h7, 32'h6);
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("T9: backdoor err not a datapath error", rd & 32'h3F, 0);
+      axil_wr(CSR_CTRL, 32'h0);
+    end
+  endtask
+`else
+  task automatic test_t9();
+    logic [31:0] d;
+    begin
+      hades_log("--- T9 static: pin backdoor ---");
+      #10_000;
+      // pin backdoor init of ports 0/1 scratch, read back via target domain
+      for (int w = 0; w < 4; w++) begin
+        bkp_pin(1, 0, 32'h0002_0000 + w, 32'hB100_0000 + w, d);
+        hades_mem_write(0, 32'h0002_0000 + w, 32'hB100_0000 + w);
+        bkp_pin(1, 1, 32'h0002_1000 + w, 32'hB200_0000 + w, d);
+        hades_mem_write(1, 32'h0002_1000 + w, 32'hB200_0000 + w);
+      end
+      sram_read_burst(0, 4, 32'h0002_0000);
+      sram_read_burst(1, 4, 32'h0002_1000);
+      drain();
+      // concurrent: traffic on port 0 + pin backdoor on port 2
+      fork
+        begin
+          sram_write_burst(0, 32, 32'h0800, 32'h0808_0000);
+          sram_read_burst(0, 32, 32'h0800);
+        end
+        begin
+          bkp_pin(1, 2, 32'h0003_0000, 32'hDEAD_5678, d);
+          hades_mem_write(2, 32'h0003_0000, 32'hDEAD_5678);
+          bkp_pin(0, 2, 32'h0003_0000, 0, d);
+          hades_check_eq("static bkp readback", d, 32'hDEAD_5678);
+        end
+      join
+      drain();
+      hades_check_eq("T9 static: stat_err clean", stat_err, 0);
+    end
+  endtask
+`endif
+
+  // ------------------------------------------------------------------
   // T13a (lite): X on CDC paths / inputs must not reach data outputs
   // (full X-propagation and metastability campaign is M5/T13)
   // ------------------------------------------------------------------
@@ -925,6 +1283,17 @@ module tb_hades_top;
       #20_000;
       hades_check_eq("static: ready after restore", stat_ready, 1);
 
+      // 100 KHz gear + full-load subset (static T4/T7 coverage; P_L=2)
+      cur_lat = 2;
+      port_clk_set_khz(100);
+      #200_000;                      // freq_mon re-measure (5x10 us periods)
+      hades_check_eq("static: ready at 100 KHz", stat_ready, 1);
+      t4_run(64, 16);
+      drain();
+      hades_check_eq("static 100KHz full-load: stat_err clean", stat_err, 0);
+      port_clk_set_khz(500);
+      #20_000;
+
 `ifdef PARAM_OVRD
       hades_check_eq("ovrd base[3]", dut.cfg_eff.port_base[3], OVRD_BASE3);
       hades_check_eq("ovrd size[3]", dut.cfg_eff.port_size[3], OVRD_SIZE3);
@@ -955,6 +1324,8 @@ module tb_hades_top;
       test_static();
       hades_phase_init();
       test_t3();
+      hades_phase_init();
+      test_t9();
 `else
       test_t6_csr();
       hades_phase_init();
@@ -964,12 +1335,24 @@ module tb_hades_top;
       hades_phase_init();
       test_t3();
       hades_phase_init();
+      test_t4();
+      hades_phase_init();
+      test_t5();
+      hades_phase_init();
+      test_t7();
+      hades_phase_init();
+      test_t9();
+      hades_phase_init();
       test_t13a();
 `endif
     end else if (test == "t6_csr")        test_t6_csr();
     else if (test == "t1") begin calib_done = 1'b1; test_t1(n_ops); end
     else if (test == "t2") begin calib_done = 1'b1; test_t2();      end
     else if (test == "t3") begin calib_done = 1'b1; test_t3();      end
+    else if (test == "t4") begin calib_done = 1'b1; test_t4();      end
+    else if (test == "t5") begin calib_done = 1'b1; test_t5();      end
+    else if (test == "t7") begin calib_done = 1'b1; test_t7();      end
+    else if (test == "t9") begin calib_done = 1'b1; test_t9();      end
     else if (test == "t14") begin                    test_t14();    end
     else if (test == "t13a") begin calib_done = 1'b1; test_t13a();  end
     else if (test == "static_smoke")     test_static();
