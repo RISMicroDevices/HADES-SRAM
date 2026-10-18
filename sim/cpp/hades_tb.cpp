@@ -61,6 +61,11 @@ void hades_phase_init() {
     while (!g_exp[i].empty()) g_exp[i].pop();
 }
 
+// reset-recovery tests: suppress the due-cycle checks while a reset wipes
+// in-flight traffic (their expectations are then dropped by phase_init)
+int g_suspend = 0;
+void hades_suspend_checks(int on) { g_suspend = on; }
+
 // ---------------------------------------------------------------- models ---
 
 long long hades_exp_id() { return 0xADE50100LL; }
@@ -113,6 +118,7 @@ void hades_read_expect_late(int port, long long due_cycle) {
 // called for every port at every port_clk edge (post-edge sample):
 // rvalid must be 1 iff the head of the port's queue is due this cycle
 void hades_port_edge(int port, long long cycle, int rvalid, int rdata) {
+  if (g_suspend) return;   // reset-recovery window: in-flight state wiped
   auto& q = g_exp[port & (kMaxPorts - 1)];
   if (!q.empty() && q.front().due_cycle == (uint64_t)cycle) {
     g_check++;

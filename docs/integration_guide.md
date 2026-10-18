@@ -1,6 +1,6 @@
 # HADES-SRAM Integration Guide
 
-Status: **M4 done** (sections marked [*M-later*] are filled by the named milestone).
+Status: **M5-sim done** (sections marked [*M-later*] are filled by the named milestone).
 
 ## 1. Overview
 
@@ -69,6 +69,7 @@ CSR `BKP_*` registers (CSR_EN=1) or the `bkp_*` pins (CSR_EN=0) drive `hades_bac
 - C1–C3 channels unused (multi-channel = documented expansion path when N exceeds one channel's slot budget)
 - No caching/prefetch/write-combining (bandwidth usage ≈1.3% — unnecessary)
 - L is global (per-group extension bits reserved)
+- Backend fault model: a read unanswered for 768 `ui_clk` cycles completes with synthetic zeros and sets `ERR_STATUS.bit1` (liveness backstop; worst legal latency ≈ 136 cycles at full 64-port load — 5× margin). At L=2 the zero lands before the release edge, so the bit5 sentinel stays silent (bit1 is the alarm); at L=1 the sentinel fires first. A backend that is late-but-alive past the timeout is outside the legal model and may misroute the eventual response — treat bit1 as a fatal alarm.
 
 ## 9. Roadmap
 
@@ -78,7 +79,8 @@ CSR `BKP_*` registers (CSR_EN=1) or the `bkp_*` pins (CSR_EN=0) drive `hades_bac
 | M2 (done) | Full per-port datapath: hades_port (CDC: Gray-FIFO + quasi-static slots), timing shaper (L=1/2, back-to-back), mig_if (FCFS AXI4 engine, 32-deep outstanding, sub-word lanes, stats + illegal/SLVERR/drop errors), AXI4 MIG model with refresh/periodic-read/ZQCS occupancy | T1 (1e5 ops), T2 (L=1/2 exact), T13a-lite — SYNC+ASYNC, CSR+static, VCS+xsim |
 | M3 (done) | Refresh/ZQCS scheduling (window-geared debt scheduler, period tick), determinism guards; model maintenance now request-driven (+MAINT_STRESS / +RD_LAT_ADD knobs) | T2(L=1), T3 (+stress), T11 (5 legs), T14 — SYNC+ASYNC, CSR+static, VCS+xsim |
 | M4 (done) | TDMA arbiter (static slot table, eligibility latches), backdoor (CSR + pins, lowest-priority requester), CFG_PORTS gear gating; T7 ASYNC phase walk + ±0.5% drift | T4 (64/32/16/8 + L=1), T5, T7 (100/500 KHz), T9, T11 — SYNC+ASYNC, CSR+static, VCS+xsim |
-| M5 | Hardening, coverage, VCU1525 acceptance, IP package | T8–T13, A1–A10 |
+| M5-sim (done) | error paths, backend-timeout backstop, config reload, full CDC campaign, long regression, VCS coverage gate; fixed the 16-bit latency-counter wrap (false timeouts at each 2^16-cycle wrap) | T8, T10 (1e6 cycles, VCS), T12, T13 full, coverage line ≥95% / FSM 100% |
+| M5-hw | SELFTEST_EN on-chip checkers, VCU1525 build (SYNC+ASYNC), JTAG-AXI host path, IP package | A1–A10 |
 
 ## 10. VCU1525 hardware spike (2026-10-17)
 

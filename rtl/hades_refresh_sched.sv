@@ -162,7 +162,7 @@ module hades_refresh_sched
         end
         S_REF:   if (app_ref_ack) state <= S_IDLE;
         S_ZQ:    if (app_zq_ack)  state <= S_IDLE;
-        default: state <= S_IDLE;
+        // no default: unique-case violation in sim flags X/corruption
       endcase
     end
   end

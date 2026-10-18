@@ -53,10 +53,18 @@ module hades_port
   input  wire logic           rsp_vld,    // 1 ui_clk cycle: read response
   input  wire logic [DW-1:0]  rsp_data,
 
-  // ---- error events ----
-  output          logic       err_window,   // 1 port_clk cycle: response late (bit5)
-  output          logic       err_ovf,      // 1 port_clk cycle: request FIFO overflow (bit2)
-  output          logic       err_slot      // 1 ui_clk cycle: response slot overflow (bit2)
+  // ---- error records (port_clk domain): sticky levels (static pin mirror)
+  //      + event toggles (one flip per violation; the ui_clk side edge-
+  //      detects, same scheme as the release events).  err_clr is the
+  //      per-port clear pulse from the shared CSR-indexed clear crossing.
+  //      Violations on one port are >= 1 target period apart, so no toggle
+  //      event can be lost.
+  output      logic       err_win_tog,   // toggle per window sentinel event
+  output      logic       err_ovf_tog,   // toggle per request-FIFO overflow
+  output      logic       err_win_stky,  // sticky level (port reset / err_clr)
+  output      logic       err_ovf_stky,
+  output      logic       err_slot,      // 1 ui_clk cycle: response slot overflow
+  input  wire logic       err_clr        // 1 port_clk cycle: clear stickies
 );
 
   // ------------------------------------------------------------------
@@ -128,7 +136,40 @@ module hades_port
       wr_ovf <= wr_req_p & wr_full;
     end
   end
-  assign err_ovf = rd_ovf | wr_ovf;
+
+  // ------------------------------------------------------------------
+  // error records: sticky levels + event toggles (see port list notes)
+  // ------------------------------------------------------------------
+  logic win_stky_r, ovf_stky_r;
+  logic win_tog_r,  ovf_tog_r;
+  wire  logic ovf_evt = rd_ovf | wr_ovf;
+
+  always_ff @(posedge port_clk) begin
+    if (port_rst) begin
+      win_stky_r <= 1'b0;
+      ovf_stky_r <= 1'b0;
+      win_tog_r  <= 1'b0;
+      ovf_tog_r  <= 1'b0;
+    end else begin
+      if (sh_err_window) begin
+        win_stky_r <= 1'b1;
+        win_tog_r  <= ~win_tog_r;
+      end
+      if (ovf_evt) begin
+        ovf_stky_r <= 1'b1;
+        ovf_tog_r  <= ~ovf_tog_r;
+      end
+      if (err_clr) begin
+        win_stky_r <= 1'b0;
+        ovf_stky_r <= 1'b0;
+      end
+    end
+  end
+
+  assign err_win_tog  = win_tog_r;
+  assign err_ovf_tog  = ovf_tog_r;
+  assign err_win_stky = win_stky_r;
+  assign err_ovf_stky = ovf_stky_r;
 
   // =========================================================================
   // Response hold slots (ui_clk writes; port_clk shaper samples quasi-static)
@@ -183,7 +224,6 @@ module hades_port
     .rel_slot   (sh_rel_slot),
     .err_window (sh_err_window)
   );
-  assign err_window = sh_err_window;
 
   // release *events* return to ui_clk as a toggle (one flip per release).
   // A level + edge-detect would collapse back-to-back releases (rel stays

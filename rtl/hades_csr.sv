@@ -14,7 +14,9 @@
 //    enable and sets ERR_STATUS.bit4; it auto-recovers when the clock is
 //    healthy again (spec A10a behavior) without software rewriting CTRL
 //  - SOFT_RESET (CTRL.bit1) is a self-clearing strobe: clears ENABLE and
-//    error/stat accumulation; configuration registers are retained
+//    error/stat accumulation; configuration registers are retained.  The
+//    port-domain reset stretch keeps the datapath gated (READY reads 0)
+//    until it has actually exited reset; software polls STATUS.READY.
 //  - CFG_LATENCY takes effect on the next ENABLE 0->1 transition only
 //-----------------------------------------------------------------------------
 `default_nettype none
@@ -56,6 +58,8 @@ module hades_csr
   input  wire logic [31:0] meas_period,
   input  wire logic        refresh_active,
   input  wire logic        zq_active,
+  input  wire logic        port_rst_busy,   // port domain still in soft-reset
+                                            // stretch (soft_port synced back)
 
   // datapath error/stat inputs.  err_in carries 1-cycle event pulses:
   // err_in[3:0] = spec ERR_STATUS bits 0..3 (illegal addr, timeout, drop,
@@ -118,6 +122,14 @@ module hades_csr
 
   wire logic freq_ok  = clk_running & ~over_freq;
   wire logic allow_en = calib_done & freq_ok;
+
+  // SOFT_RESET stretch bookkeeping: the port domain stays in reset for
+  // 8192 ui_clk cycles after the strobe plus the CDC round trip; ENABLE
+  // must stay gated off (READY reads 0) until the datapath is truly out
+  // of reset, or a request accepted in the window would be dropped into a
+  // resetting FIFO.  soft_cnt covers [strobe, +8192]; port_rst_busy
+  // covers the tail until the port domain actually clears.
+  logic [13:0] soft_cnt;
 
   // ------------------------------------------------------------------
   // AXI4-Lite write channel
@@ -221,6 +233,7 @@ module hades_csr
       bkp_addr_q      <= 40'd0;
       bkp_wdata_q     <= 32'd0;
       bkp_done_stky   <= 1'b0;
+      soft_cnt        <= 14'd0;
       fb = dflt_base_flat();
       for (i = 0; i < N_MAX; i = i + 1) begin
         port_base_q[i] <= fb[i*BASE_W +: BASE_W];
@@ -253,6 +266,10 @@ module hades_csr
       port_err_clr   <= 1'b0;
       bkp_go_rd      <= 1'b0;
       bkp_go_wr      <= 1'b0;
+
+      // soft-reset stretch counter
+      if (soft_reset_stb)        soft_cnt <= 14'd8192;
+      else if (soft_cnt != 14'd0) soft_cnt <= soft_cnt - 14'd1;
 
       // engine completion latches into a pollable flag; a new command clears it
       if (bkp_done) bkp_done_stky <= 1'b1;
@@ -351,7 +368,7 @@ module hades_csr
   // ------------------------------------------------------------------
   // Outputs
   // ------------------------------------------------------------------
-  assign enable = enable_req & allow_en;
+  assign enable = enable_req & allow_en & (soft_cnt == 14'd0) & ~port_rst_busy;
 
   always_comb begin
     cfg.latency      = latency_active;

@@ -7,8 +7,9 @@ General rules (spec §3.3):
 - All registers power-on to safe defaults: `ENABLE=0`, all ports disabled.
 - `ENABLE` (CTRL.bit0) is rejected — stays 0 and sets `ERR_STATUS.bit4` — unless `CALIB_DONE && clk_running && !over_freq`.
 - While enabled, losing the port clock or going over-frequency drops the effective enable and sets `ERR_STATUS.bit4`; the enable **auto-recovers** when the clock is healthy again (no software rewrite needed).
-- `SOFT_RESET` (CTRL.bit1) is a self-clearing strobe: clears ENABLE, error and statistic accumulation; configuration registers are retained.
+- `SOFT_RESET` (CTRL.bit1) is a self-clearing strobe: clears ENABLE, error and statistic accumulation; configuration registers are retained. The port-domain reset stretch (~2^14 `ui_clk` cycles + CDC) gates `ENABLE`: `STATUS.READY` reads 0 until the datapath has actually exited reset — after a SOFT_RESET, poll READY rather than assuming immediate availability.
 - `CFG_LATENCY` takes effect on the next ENABLE 0→1 transition only.
+- Backend read timeout (ERR_STATUS.bit1): a read with no backend response for 768 `ui_clk` cycles (worst legal is ~136 at full load, >5x margin) completes with synthetic zeros and sets bit1 — the IP never hangs. At L=2 the synthetic zero lands before the release edge (deadline 1200 cycles), so a dead backend surfaces as bit1 without the bit5 sentinel; at L=1 the sentinel fires first (deadline 600 < 768). A MIG that is late-but-alive past the timeout is outside the legal model.
 
 ## Global registers
 

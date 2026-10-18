@@ -122,7 +122,7 @@ module hades_backdoor
             state <= B_IDLE;
           end
         end
-        default: state <= B_IDLE;
+        // no default: unique-case violation in sim flags X/corruption
       endcase
     end
   end

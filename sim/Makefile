@@ -8,7 +8,10 @@
 # Variants:  csr (CSR_EN=1 SYNC) | csr_async (CSR_EN=1 ASYNC) |
 #            static (CSR_EN=0 SYNC) | ovrd (CSR_EN=0 SYNC + param override)
 # Extra runs per csr/csr_async/static build: T3 with +MAINT_STRESS=1 (worst
-# maintenance alignment), T14 with +RD_LAT_ADD=1500 (bit5 sentinel fault).
+# maintenance alignment), T14 with +RD_LAT_ADD=1500 (bit5 sentinel fault),
+# T8 with +DROP_RD_BEAT/+SLVERR_RD_BEAT/+SLVERR_WR_BEAT (error paths).
+# T10 long regression: VCS csr 1e6 periods (spec), csr_async 1e5 smoke;
+# xsim csr 5e4 smoke (VCS is the authoritative simulator for length).
 
 SIM      ?= vcs
 VCS      := /home/kumon/Synopsys/vcs/X-2025.06/bin/vcs
@@ -32,8 +35,13 @@ CPP_ABS := $(abspath $(CPP))
 OPS_vcs  := 100000
 OPS_xsim := 10000
 
-.PHONY: test test-vcs test-xsim lint check_bounds clean
+.PHONY: test test-vcs test-xsim lint check_bounds cov clean
+# the one-command gate (spec section 7): full suite + bounds; coverage on VCS
+ifeq ($(SIM),vcs)
+test: test-$(SIM) check_bounds cov
+else
 test: test-$(SIM) check_bounds
+endif
 
 # ----------------------------------------------------------------- VCS -----
 VCS_COMMON := -full64 -sverilog -timescale=1ns/1ps -top tb_hades_top
@@ -80,6 +88,31 @@ test-vcs: $(foreach v,$(VCS_VARIANTS),$(BUILD)/vcs_$(v)/simv)
 	    && echo "VCS $$v t14: PASS" \
 	    || { echo "VCS $$v t14: FAIL (see $(BUILD)/vcs_$$v/run_t14.log)"; fail=1; }; \
 	done; \
+	for v in csr csr_async static; do \
+	  echo "=== VCS $$v TEST=t8 (fault knobs) ==="; \
+	  ./$(BUILD)/vcs_$$v/simv +TEST=t8 +DROP_RD_BEAT=7777 +DROP_RD_BEAT2=C0ACE +SLVERR_RD_BEAT=40555 \
+	    +SLVERR_WR_BEAT=999 > $(BUILD)/vcs_$$v/run_t8.log 2>&1; \
+	  grep -q HADES_TEST_PASS $(BUILD)/vcs_$$v/run_t8.log \
+	    && echo "VCS $$v t8: PASS" \
+	    || { echo "VCS $$v t8: FAIL (see $(BUILD)/vcs_$$v/run_t8.log)"; fail=1; }; \
+	done; \
+	echo "=== VCS csr TEST=ovf +AR_STALL_LEN=8000 ==="; \
+	./$(BUILD)/vcs_csr/simv +TEST=ovf +AR_STALL_LEN=8000 > $(BUILD)/vcs_csr/run_ovf.log 2>&1; \
+	grep -q HADES_TEST_PASS $(BUILD)/vcs_csr/run_ovf.log \
+	  && echo "VCS csr ovf: PASS" \
+	  || { echo "VCS csr ovf: FAIL (see $(BUILD)/vcs_csr/run_ovf.log)"; fail=1; }; \
+	echo "=== VCS csr TEST=t10 T10_PER=1000000 (long regression) ==="; \
+	./$(BUILD)/vcs_csr/simv +TEST=t10 +T10_PER=1000000 +WDOG_MS=4000 \
+	  > $(BUILD)/vcs_csr/run_t10.log 2>&1; \
+	grep -q HADES_TEST_PASS $(BUILD)/vcs_csr/run_t10.log \
+	  && echo "VCS csr t10: PASS" \
+	  || { echo "VCS csr t10: FAIL (see $(BUILD)/vcs_csr/run_t10.log)"; fail=1; }; \
+	echo "=== VCS csr_async TEST=t10 T10_PER=100000 (reduced smoke) ==="; \
+	./$(BUILD)/vcs_csr_async/simv +TEST=t10 +T10_PER=100000 +WDOG_MS=600 \
+	  > $(BUILD)/vcs_csr_async/run_t10.log 2>&1; \
+	grep -q HADES_TEST_PASS $(BUILD)/vcs_csr_async/run_t10.log \
+	  && echo "VCS csr_async t10: PASS" \
+	  || { echo "VCS csr_async t10: FAIL (see $(BUILD)/vcs_csr_async/run_t10.log)"; fail=1; }; \
 	[ $$fail -eq 0 ] && echo "ALL VCS TESTS PASS" || exit 1
 
 # ---------------------------------------------------------------- xsim -----
@@ -127,9 +160,72 @@ test-xsim: $(foreach v,$(XSIM_VARIANTS),$(BUILD)/xsim_$(v)/snap)
 	    && echo "xsim $$v t14: PASS" \
 	    || { echo "xsim $$v t14: FAIL (see $(BUILD)/xsim_$$v/run_t14.log)"; fail=1; }; \
 	done; \
+	for v in csr csr_async static; do \
+	  echo "=== xsim $$v TEST=t8 (fault knobs) ==="; \
+	  cd $(BUILD)/xsim_$$v && $(VIVADO_BIN)/xsim snap -R -testplusarg TEST=t8 \
+	    -testplusarg DROP_RD_BEAT=7777 -testplusarg DROP_RD_BEAT2=C0ACE \
+	    -testplusarg SLVERR_RD_BEAT=40555 -testplusarg SLVERR_WR_BEAT=999 > run_t8.log 2>&1; cd ../..; \
+	  grep -q HADES_TEST_PASS $(BUILD)/xsim_$$v/run_t8.log \
+	    && echo "xsim $$v t8: PASS" \
+	    || { echo "xsim $$v t8: FAIL (see $(BUILD)/xsim_$$v/run_t8.log)"; fail=1; }; \
+	done; \
+	echo "=== xsim csr TEST=ovf AR_STALL_LEN=8000 ==="; \
+	cd $(BUILD)/xsim_csr && $(VIVADO_BIN)/xsim snap -R -testplusarg TEST=ovf \
+	  -testplusarg AR_STALL_LEN=8000 > run_ovf.log 2>&1; cd ../..; \
+	grep -q HADES_TEST_PASS $(BUILD)/xsim_csr/run_ovf.log \
+	  && echo "xsim csr ovf: PASS" \
+	  || { echo "xsim csr ovf: FAIL (see $(BUILD)/xsim_csr/run_ovf.log)"; fail=1; }; \
+	echo "=== xsim csr TEST=t10 T10_PER=50000 (reduced) ==="; \
+	cd $(BUILD)/xsim_csr && $(VIVADO_BIN)/xsim snap -R -testplusarg TEST=t10 \
+	  -testplusarg T10_PER=50000 -testplusarg WDOG_MS=300 > run_t10.log 2>&1; cd ../..; \
+	grep -q HADES_TEST_PASS $(BUILD)/xsim_csr/run_t10.log \
+	  && echo "xsim csr t10: PASS" \
+	  || { echo "xsim csr t10: FAIL (see $(BUILD)/xsim_csr/run_t10.log)"; fail=1; }; \
 	[ $$fail -eq 0 ] && echo "ALL XSIM TESTS PASS" || exit 1
 
 # ---------------------------------------------------------------- gates ----
+# VCS coverage (DUT subtree only, see cm_hier.txt): line+fsm over the full
+# CSR-variant test set on the SYNC build PLUS the static-variant build
+# (covers the g_static branch), merged and gated at line >= 95% / FSM 100%
+# (spec section 6.1).
+COVDIR  := $(BUILD)/cov
+COVDIRS := $(BUILD)/cov_static
+
+$(COVDIR)/simv: $(RTL) $(TB) $(MDL) $(CPP) cm_hier.txt
+	@mkdir -p $(COVDIR)
+	@rm -rf $(COVDIR)/simv.vdb   # stale design+test data would mismatch
+	cd $(COVDIR) && $(VCS) $(VCS_COMMON) -cm line+fsm -cm_hier $(abspath cm_hier.txt) \
+	  $(RTL_ABS) $(TB_ABS) $(MDL_ABS) $(CPP_ABS) -o simv > compile.log 2>&1 \
+	  || { echo "VCS cov compile FAILED"; tail -40 $(COVDIR)/compile.log; exit 1; }
+
+$(COVDIRS)/simv: $(RTL) $(TB) $(MDL) $(CPP) cm_hier.txt
+	@mkdir -p $(COVDIRS)
+	@rm -rf $(COVDIRS)/simv.vdb
+	cd $(COVDIRS) && $(VCS) $(VCS_COMMON) +define+CSR_STATIC \
+	  -cm line+fsm -cm_hier $(abspath cm_hier.txt) \
+	  $(RTL_ABS) $(TB_ABS) $(MDL_ABS) $(CPP_ABS) -o simv > compile.log 2>&1 \
+	  || { echo "VCS cov-static compile FAILED"; tail -40 $(COVDIRS)/compile.log; exit 1; }
+
+COV_RUN = cd $(1) && ./simv $2 -cm line+fsm -cm_name $3 >> cov_run.log 2>&1 \
+            || { echo "cov run $3 FAILED ($(1))"; tail -20 $(1)/cov_run.log; exit 1; }
+
+cov: $(COVDIR)/simv $(COVDIRS)/simv
+	@rm -f $(COVDIR)/cov_run.log $(COVDIRS)/cov_run.log
+	@$(call COV_RUN,$(COVDIR),+TEST=all_csr +OPS=100000,all_csr)
+	@$(call COV_RUN,$(COVDIR),+TEST=t3 +MAINT_STRESS=1,t3s)
+	@$(call COV_RUN,$(COVDIR),+TEST=t14 +RD_LAT_ADD=1500,t14)
+	@$(call COV_RUN,$(COVDIR),+TEST=t8 +DROP_RD_BEAT=7777 +DROP_RD_BEAT2=C0ACE +SLVERR_RD_BEAT=40555 +SLVERR_WR_BEAT=999,t8)
+	@$(call COV_RUN,$(COVDIR),+TEST=ovf +AR_STALL_LEN=8000,ovf)
+	@$(call COV_RUN,$(COVDIR),+TEST=t10 +T10_PER=3000 +WDOG_MS=1200,t10)
+	@$(call COV_RUN,$(COVDIRS),+TEST=all_static,all_static)
+	@$(call COV_RUN,$(COVDIRS),+TEST=t14 +RD_LAT_ADD=1500,t14s)
+	@$(call COV_RUN,$(COVDIRS),+TEST=t8 +DROP_RD_BEAT=7777 +DROP_RD_BEAT2=C0ACE +SLVERR_RD_BEAT=40555 +SLVERR_WR_BEAT=999,t8s)
+	cd $(COVDIR) && $(dir $(VCS))urg -dir simv.vdb -dir ../cov_static/simv.vdb \
+	  -report urg -format text -elfile $(abspath cov_excl.el) -excl_bypass_checks > urg.log 2>&1
+	@echo "--- coverage summary (DUT modules) ---"
+	@sed -n '/Total Module Definition Coverage Summary/,/Total modules/p' $(COVDIR)/urg/modlist.txt
+	@python3 cov_check.py $(COVDIR)/urg/modlist.txt
+
 lint:
 	@mkdir -p $(BUILD)/lint_csr $(BUILD)/lint_static
 	cd $(BUILD)/lint_csr    && $(VIVADO_BIN)/xvlog --sv $(RTL_ABS) > compile.log 2>&1 \

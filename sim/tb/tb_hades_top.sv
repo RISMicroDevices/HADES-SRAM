@@ -1,17 +1,20 @@
 //-----------------------------------------------------------------------------
-// HADES-SRAM — SV testbench harness (M4).
+// HADES-SRAM — SV testbench harness (M5).
 // Pin-level protocol here (dual clocks, resets, AXI4-Lite BFM, SRAM port
 // drivers/monitors, MIG model wiring); test intent in sim/cpp/hades_tb.cpp
 // via DPI-C (expected memory, exact-latency due-cycle queues, accounting).
 //
 // Build variants (+define+):
 //   (none)                 CSR_EN=1, SYNC    TEST=all_csr
-//                          (t6_csr,t1,t2,t3,t4,t5,t7,t9,t13a)
-//   ASYNC                  CSR_EN=1, ASYNC   TEST=all_csr (t7 walks phase)
+//                          (t6,t1,t2,t3,t4,t5,t7,t9,t12,rst,t13b/c/d,t13a)
+//   ASYNC                  CSR_EN=1, ASYNC   TEST=all_csr (t7/t13d walk phase)
 //   CSR_STATIC             CSR_EN=0, SYNC    TEST=all_static (static,t3,t9)
 //   CSR_STATIC+PARAM_OVRD  CSR_EN=0, SYNC, user P_PORT_BASE/SIZE overrides
 // Dedicated runs (not in all_*): TEST=t3 +MAINT_STRESS=1 (worst-case
-// maintenance alignment), TEST=t14 +RD_LAT_ADD=1500 (bit5 sentinel fault).
+// maintenance alignment), TEST=t14 +RD_LAT_ADD=1500 (bit5 sentinel fault),
+// TEST=t8 +DROP_RD_BEAT/+DROP_RD_BEAT2/+SLVERR_RD_BEAT/+SLVERR_WR_BEAT
+// (error paths), TEST=ovf +AR_STALL_LEN=8000 (request-FIFO overflow),
+// TEST=t10 +T10_PER=n (long regression; +WDOG_MS raises the watchdog).
 //
 // Clocks: ui_clk 300 MHz.  SYNC: port_clk derived from ui_clk by integer
 // divider (same-source).  ASYNC: independent realtime generator,
@@ -335,6 +338,7 @@ module tb_hades_top;
   // ------------------------------------------------------------------
   import "DPI-C" context function void     hades_init();
   import "DPI-C" context function void     hades_phase_init();
+  import "DPI-C" context function void     hades_suspend_checks(int on);
   import "DPI-C" context function longint  hades_exp_id();
   import "DPI-C" context function longint  hades_exp_params(int is_sync, int ui_mhz,
                                                            int port_mib, int dw, int n_max);
@@ -504,14 +508,19 @@ module tb_hades_top;
   endtask
 
   // ------------------------------------------------------------------
-  // Reset
+  // Reset.  Resets must be held for >= 3 port_clk periods: the port domain
+  // (FIFOs, shaper) is synchronous to the slow clock, and the afifo's two
+  // sides must reset together — a ui-only pulse would corrupt the Gray
+  // pointers.  (The CSR SOFT_RESET instead stretches into the port domain
+  // by design; see the top level.)  calib_done drops (the TB models the
+  // MIG recalibrating across a system reset).
   // ------------------------------------------------------------------
   task automatic do_reset();
     begin
       ui_rst_n   = 1'b0;
       port_rst_n = 1'b0;
       calib_done = 1'b0;
-      repeat (10) @(posedge ui_clk);
+      repeat (3) @(posedge port_clk);
       ui_rst_n   = 1'b1;
       port_rst_n = 1'b1;
       repeat (10) @(posedge ui_clk);
@@ -549,7 +558,12 @@ module tb_hades_top;
       csr_default_map();
       repeat (6) @(posedge port_clk);   // let freq_mon measure the clock
       axil_wr(CSR_CTRL, 32'h1);
-      axil_rd(CSR_STATUS, rd);
+      // poll READY: after a SOFT_RESET the port-domain reset stretch gates
+      // ENABLE for ~9.4k ui_clk cycles; each poll is ~10 cycles
+      for (int t = 0; t < 2500; t++) begin
+        axil_rd(CSR_STATUS, rd);
+        if ((rd & 32'h3) == 32'h3) break;
+      end
       hades_check_eq("STATUS ready after ENABLE", rd & 32'h3, 32'h3);
       cur_lat = lat;
     end
@@ -873,7 +887,11 @@ module tb_hades_top;
       end
       drain();
       expect_sentinel = 0;
-      hades_check_eq("T14 static: sentinel stat_err[5] set", stat_err[5], 1);
+      // L=2 + the 768-cycle backend-timeout backstop: the synthetic zero
+      // lands before the release edge, so a dead backend surfaces as bit1
+      // (timeout), not bit5.  The sentinel is reachable at L=1 (CSR runs).
+      hades_check_eq("T14 static: timeout backstop stat_err[1]", stat_err[1], 1);
+      hades_check_eq("T14 static: sentinel bit5 stays 0", stat_err[5], 0);
 `else
       csr_enable(1, 64'h1);   // L=1: tightest response window
       expect_sentinel = 1;
@@ -891,13 +909,202 @@ module tb_hades_top;
       axil_rd(CSR_ERR_STATUS, rd);
       hades_check_eq("T14: ERR_STATUS.bit5 sentinel set", rd & 32'h20, 32'h20);
       hades_check_eq("T14: first-error port = 0", (rd >> 8) & 32'hFF, 0);
-      axil_wr(CSR_ERR_STATUS, 32'h20);   // W1C
+      axil_wr(CSR_ERR_STATUS, 32'h3F);   // W1C all (timeout bit1 also fired)
       axil_rd(CSR_ERR_STATUS, rd);
-      hades_check_eq("T14: bit5 W1C clears", rd & 32'h3F, 0);
+      hades_check_eq("T14: error bits W1C clear", rd & 32'h3F, 0);
       axil_wr(CSR_CTRL, 32'h0);
 `endif
     end
   endtask
+
+  // ------------------------------------------------------------------
+  // T8: error paths.  Needs the model fault knobs (+DROP_RD_BEAT /
+  //  +SLVERR_RD_BEAT / +SLVERR_WR_BEAT); skipped without them.  Fixed
+  //  target addresses, so the beats are known at launch:
+  //    timeout    : port 0 word 0x77777 -> beat 0x07777
+  //    SLVERR rd  : port 1 word 0x05555 -> beat 0x40555
+  //    SLVERR wr  : port 0 word 0x09999 -> beat 0x00999
+  //  Criteria: right ERR_STATUS/stat_err bits with the right port, the
+  //  faulted access still completes (synthetic zero on schedule for the
+  //  timeout, real data with SLVERR status), and traffic continues clean
+  //  afterwards (no hang).
+  // ------------------------------------------------------------------
+  task automatic test_t8();
+    logic [31:0] rd;
+    longint unsigned kn_drop, kn_slvrd, kn_slvwr, kn_drop2;
+    begin
+      hades_log("--- T8: error paths (illegal / timeout / SLVERR) ---");
+      if (!($value$plusargs("DROP_RD_BEAT=%h", kn_drop)
+            && $value$plusargs("DROP_RD_BEAT2=%h", kn_drop2)
+            && $value$plusargs("SLVERR_RD_BEAT=%h", kn_slvrd)
+            && $value$plusargs("SLVERR_WR_BEAT=%h", kn_slvwr))) begin
+        hades_log("T8 skipped: needs +DROP_RD_BEAT/+DROP_RD_BEAT2/+SLVERR_RD_BEAT/+SLVERR_WR_BEAT");
+        return;
+      end
+      calib_done = 1'b1;
+`ifdef CSR_STATIC
+      #10_000;   // auto-enable (P_L=2)
+      cur_lat = 2;
+`ifdef PARAM_OVRD
+      // illegal: port 3 is shrunk to 128 KiW by the override — read beyond
+      // it.  (In the plain static map every 22-bit address is legal by
+      // construction, so bit0 is exercised here and in the CSR variants.)
+      @(negedge port_clk);
+      sram_en[3] <= 1'b1; sram_we[3] <= 1'b0; sram_addr[3] <= 32'h0002_0000;
+      hades_read_expect0(3, pcycle + 1 + cur_lat);
+      @(negedge port_clk);
+      sram_en[3] <= 1'b0;
+      drain();
+`endif
+      // timeout: the dropped read completes as scheduled zeros
+      @(negedge port_clk);
+      sram_en[0] <= 1'b1; sram_we[0] <= 1'b0; sram_addr[0] <= 32'h0007_7777;
+      hades_read_expect0(0, pcycle + 1 + cur_lat);
+      @(negedge port_clk);
+      sram_en[0] <= 1'b0;
+      drain();
+      // SLVERR read (real data + error flag) and SLVERR write (applied,
+      // then flagged on B)
+      sram_write(1, 32'h5555, 32'hABCD_0001);
+      drain();
+      sram_read(1, 32'h5555);
+      sram_write(0, 32'h9999, 32'h0BAD_0BAD);
+      drain();
+      sram_read(0, 32'h9999);   // written data survives the SLVERR flag
+      drain();
+`ifdef PARAM_OVRD
+      hades_check_eq("T8 static: stat_err bits 0/1/3", stat_err, 8'h0B);
+`else
+      // plain static map: bit0 unreachable (every 22-bit address legal)
+      hades_check_eq("T8 static: stat_err bits 1/3", stat_err, 8'h0A);
+`endif
+      // no hang: clean burst afterwards (scoreboard validates)
+      sram_write_burst(0, 32, 32'h4000, 32'h1234_0000);
+      sram_read_burst(0, 32, 32'h4000);
+      drain();
+`else
+      csr_enable(2, 64'hF, 4);
+
+      // (1) backdoor read of the drop2 beat: the backend timeout completes
+      // it with zeros; bit1 sets with the backdoor marker port 0xFF (done
+      // FIRST so the first-error latch is clean)
+      begin
+        logic [31:0] bst, bd;
+        bkp_rd(3, 32'h0000_ACE0, bd, bst);
+        hades_check_eq("T8: bkp timeout completes err-free", bst & 32'h7, 32'h2);
+        hades_check_eq("T8: bkp timeout data = 0", bd, 0);
+      end
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("T8: bit1 set (backdoor timeout)", (rd >> 1) & 32'h1, 32'h1);
+      hades_check_eq("T8: backdoor timeout port = 0xFF", (rd >> 8) & 32'hFF, 32'hFF);
+
+      // (2) illegal read: shrink port 0, read beyond it (synthetic zero).
+      // bit0 now sets ALONGSIDE bit1 -> first-error info must not change
+      axil_wr(CSR_PORT_SEL, 32'd0);
+      axil_wr(CSR_PORT_SIZE, 32'h0000_1000);
+      sram_read_illegal(0, 32'h0000_2000);
+      drain();
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("T8: bit0 illegal set", rd & 32'h1, 32'h1);
+      hades_check_eq("T8: first-error port stays 0xFF", (rd >> 8) & 32'hFF, 32'hFF);
+
+      // (2b) illegal WRITE: discarded silently (posted), same bit0
+      @(negedge port_clk);
+      sram_en[0] <= 1'b1; sram_we[0] <= 1'b1; sram_addr[0] <= 32'h0000_2000;
+      sram_wdata[0] <= 32'hBAD5_0000;
+      @(negedge port_clk);
+      sram_en[0] <= 1'b0;
+      drain();
+
+      // partial W1C: bits 0+1 set; clearing only bit0 must leave bit1
+      axil_wr(CSR_ERR_STATUS, 32'h1);
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("T8: partial W1C keeps bit1", rd & 32'h3, 32'h2);
+      axil_wr(CSR_ERR_STATUS, 32'h3F);
+      csr_default_map();                  // restore port 0 size
+
+      // (3) backend timeout on a port: the dropped read completes as
+      // scheduled zeros (timeout 768 < L=2 release at 1200 -> no sentinel)
+      sram_write(0, 32'h0007_7777, 32'h1234_5678);
+      @(negedge port_clk);
+      sram_en[0] <= 1'b1; sram_we[0] <= 1'b0; sram_addr[0] <= 32'h0007_7777;
+      hades_read_expect0(0, pcycle + 1 + cur_lat);
+      @(negedge port_clk);
+      sram_en[0] <= 1'b0;
+      drain();
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("T8: bit1 timeout set", (rd >> 1) & 32'h1, 32'h1);
+      hades_check_eq("T8: timeout port = 0", (rd >> 8) & 32'hFF, 0);
+      axil_wr(CSR_ERR_STATUS, 32'h3F);
+
+      // (4) SLVERR read: real data returned, bit3 flagged, port 1
+      sram_write(1, 32'h5555, 32'hABCD_0001);
+      drain();
+      sram_read(1, 32'h5555);
+      drain();
+      // (5) SLVERR write: applied to memory, flagged on B; readback clean
+      sram_write(0, 32'h9999, 32'h0BAD_0BAD);
+      drain();
+      sram_read(0, 32'h9999);
+      drain();
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("T8: bit3 SLVERR set", (rd >> 3) & 32'h1, 32'h1);
+      axil_wr(CSR_ERR_STATUS, 32'h3F);
+
+      // (6) no hang: clean burst traffic, no residual errors
+      sram_write_burst(0, 32, 32'h4000, 32'h1234_0000);
+      sram_read_burst(0, 32, 32'h4000);
+      drain();
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("T8: clean after faults", rd & 32'h3F, 0);
+      axil_wr(CSR_CTRL, 32'h0);
+`endif
+    end
+  endtask
+
+`ifndef CSR_STATIC
+  // ------------------------------------------------------------------
+  // OVF: port request-FIFO overflow (ERR_STATUS.bit2, the "dropped request"
+  // sentinel).  With the model's AR channel stalled (+AR_STALL_LEN), a
+  // back-to-back read burst overruns the depth-8 request FIFO.  All reads
+  // still release on schedule (sentinel fires too — fault expected); the
+  // documented recovery is SOFT_RESET, verified with clean traffic after.
+  // Dedicated run only (not part of all_csr).
+  // ------------------------------------------------------------------
+  task automatic test_ovf();
+    logic [31:0] rd;
+    int unsigned stall_len;
+    begin
+      hades_log("--- OVF: port request-FIFO overflow (bit2) ---");
+      if (!$value$plusargs("AR_STALL_LEN=%d", stall_len) || stall_len < 8000) begin
+        hades_log("OVF skipped: needs +AR_STALL_LEN>=8000");
+        return;
+      end
+      calib_done = 1'b1;
+      csr_enable(1, 64'h1, 1);
+      for (int k = 0; k < 12; k++) begin
+        @(negedge port_clk);
+        sram_en[0] <= 1'b1; sram_we[0] <= 1'b0; sram_addr[0] <= 32'h800 + 32'(k);
+        hades_read_expect_late(0, pcycle + 1 + cur_lat);  // data don't-care
+      end
+      @(negedge port_clk);
+      sram_en[0] <= 1'b0;
+      drain();
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("OVF: bit2 dropped-request set", (rd >> 2) & 32'h1, 32'h1);
+      // documented recovery: SOFT_RESET, re-init, clean traffic
+      axil_wr(CSR_CTRL, 32'h2);
+      repeat (20) @(posedge port_clk);
+      csr_enable(1, 64'h1, 1);
+      sram_write_burst(0, 16, 32'h9000, 32'hCAFE_1000);
+      sram_read_burst(0, 16, 32'h9000);
+      drain();
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("OVF: clean after SOFT_RESET", rd & 32'h3F, 0);
+      axil_wr(CSR_CTRL, 32'h0);
+    end
+  endtask
+`endif
 
   // ------------------------------------------------------------------
   // Backdoor access helpers (CSR register channel / static pin channel)
@@ -961,9 +1168,11 @@ module tb_hades_top;
   // ------------------------------------------------------------------
   // T4 driver: one pseudo-random access per enabled port per target period
   // (en held 1 across the run).  Single driver process with per-port
-  // xorshift state -> identical stimulus on VCS and xsim.
+  // xorshift state -> identical stimulus on VCS and xsim.  amask caps the
+  // random address (the PARAM_OVRD build shrinks port 3 to 128 KiW).
   // ------------------------------------------------------------------
-  task automatic t4_run(input int n_ports, input int n_per);
+  task automatic t4_run(input int n_ports, input int n_per,
+                        input int unsigned amask = (32'h1 << 22) - 1);
     int unsigned rs[N_MAX];
     int unsigned a, d, w;
     begin
@@ -973,7 +1182,7 @@ module tb_hades_top;
         @(negedge port_clk);
         for (int p = 0; p < n_ports; p++) begin
           rs[p] ^= rs[p] << 13; rs[p] ^= rs[p] >> 17; rs[p] ^= rs[p] << 5;
-          a = rs[p] & ((32'h1 << 22) - 1);
+          a = rs[p] & amask;
           rs[p] ^= rs[p] << 13; rs[p] ^= rs[p] >> 17; rs[p] ^= rs[p] << 5;
           d = rs[p];
           rs[p] ^= rs[p] << 13; rs[p] ^= rs[p] >> 17; rs[p] ^= rs[p] << 5;
@@ -1206,6 +1415,286 @@ module tb_hades_top;
   endtask
 `endif
 
+`ifndef CSR_STATIC
+  // ------------------------------------------------------------------
+  // T10: long regression — N=64 full load for T10_PER target periods
+  // (default suite: 1e6 on VCS, reduced on xsim; dedicated run).
+  // Criteria: zero errors; refresh count tracks the configured rate.
+  // ------------------------------------------------------------------
+  task automatic test_t10(input int n_per);
+    logic [31:0] rd;
+    longint      exp_ref;
+    begin
+      hades_log($sformatf("--- T10: long regression, N=64 x %0d periods ---",
+                          n_per));
+      calib_done = 1'b1;
+      csr_enable(2, {64{1'b1}}, 64);
+      t4_run(64, n_per);
+      drain();
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("T10: ERR_STATUS clean", rd & 32'h3F, 0);
+      axil_rd(CSR_STAT_TOT_RD_LO, rd);
+      hades_check_range("T10: reads happened", rd, 32'(n_per / 4), 32'h7FFF_FFFF);
+      // default refresh_div=2100 at the 500 KHz gear: exp = n_per*600/2100
+      axil_rd(CSR_STAT_REFCNT, rd);
+      exp_ref = (64'(n_per) * 600) / 2100;
+      hades_check_range("T10: refresh count on rate", rd,
+                        exp_ref * 98 / 100, exp_ref * 102 / 100 + 2);
+      axil_wr(CSR_CTRL, 32'h0);
+    end
+  endtask
+
+  // ------------------------------------------------------------------
+  // T12: configuration reload — run, DISABLE, change N/L/CFG_MIN_PERIOD,
+  // re-ENABLE; behavior follows the new configuration with no state leak.
+  // Also covers SOFT_RESET stat clearing and the CSR read sweep.
+  // ------------------------------------------------------------------
+  task automatic test_t12();
+    logic [31:0] rd;
+    begin
+      hades_log("--- T12: configuration reload ---");
+      calib_done = 1'b1;
+
+      csr_enable(2, 64'hFF, 8);
+      t4_run(8, 16);
+      drain();
+
+      // DISABLE, change N (8->4), L (2->1), CFG_MIN_PERIOD
+      axil_wr(CSR_CTRL, 32'h0);
+      axil_wr(CSR_CFG_MIN_PERIOD, 32'd590);
+      csr_enable(1, 64'h0F, 4);
+      axil_rd(CSR_CFG_MIN_PERIOD, rd);
+      hades_check_eq("T12: CFG_MIN_PERIOD reloaded", rd, 590);
+      t4_run(4, 16);   // scoreboard validates the new L=1 per port
+      drain();
+      // a request on a now-disabled port must be ignored (the monitor
+      // flags any unexpected rvalid)
+      @(negedge port_clk);
+      sram_en[5] <= 1'b1; sram_we[5] <= 1'b0; sram_addr[5] <= 32'h100;
+      @(negedge port_clk);
+      sram_en[5] <= 1'b0;
+      repeat (4) @(negedge port_clk);
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("T12: clean after reload", rd & 32'h3F, 0);
+
+      // SOFT_RESET: stats cleared, configuration retained
+      axil_wr(CSR_CTRL, 32'h2);
+      axil_rd(CSR_STAT_TOT_RD_LO, rd);
+      hades_check_eq("T12: stats cleared by SOFT_RESET", rd, 0);
+      axil_rd(CSR_CFG_PORTS, rd);
+      hades_check_eq("T12: config retained", rd, 4);
+      axil_rd(CSR_CFG_LATENCY, rd);
+      hades_check_eq("T12: L retained", rd & 32'h3, 1);
+
+      // CSR read sweep (register coverage)
+      axil_rd(CSR_STAT_TOT_RD_HI, rd);
+      axil_rd(CSR_STAT_TOT_WR_LO, rd);
+      axil_rd(CSR_STAT_TOT_WR_HI, rd);
+      axil_rd(CSR_STAT_MAXLAT, rd);
+      axil_rd(CSR_STAT_REFCNT, rd);
+      axil_wr(CSR_PORT_SEL, 32'd3);
+      axil_rd(CSR_PORT_STAT_RD, rd);
+      axil_rd(CSR_PORT_STAT_WR, rd);
+      axil_rd(CSR_PORT_SEL, rd);
+      hades_check_eq("T12: PORT_SEL readback", rd & 32'hFF, 3);
+      axil_rd(CSR_BKP_STATUS, rd);
+      axil_rd(CSR_BKP_ADDR_HI, rd);
+      axil_rd(CSR_BKP_PORT, rd);
+      axil_rd(CSR_BKP_ADDR, rd);
+      axil_rd(CSR_BKP_WDATA, rd);
+      axil_rd(CSR_BKP_CMD, rd);
+      axil_wr(16'h00C0, 32'hFFFF_FFFF);   // unmapped offset: ignored, no error
+      axil_rd(CSR_CFG_REFRESH_DIV, rd);
+      hades_check_eq("T12: CFG_REFRESH_DIV default", rd, 2100);
+      axil_rd(CSR_CFG_ZQ_DIV, rd);
+      hades_check_eq("T12: CFG_ZQ_DIV default", rd, 32000);
+
+      // exercise the indexed per-port error-clear crossing on a spread of
+      // ports (spaced: the toggle crossing needs one port period per clear)
+      for (int p = 0; p < N_MAX; p += 7) begin
+        axil_wr(CSR_PORT_SEL, 32'(p));
+        axil_wr(CSR_PORT_STAT_ERR, 32'h1);
+        repeat (3) @(posedge port_clk);
+      end
+
+      // restore defaults for subsequent phases
+      axil_wr(CSR_CFG_MIN_PERIOD, 32'(TARGET_PERIOD_500K));
+      csr_enable(2, 64'h3, 2);
+      sram_write_burst(0, 16, 32'h2000, 32'h77AA_0000);
+      sram_read_burst(0, 16, 32'h2000);
+      drain();
+      axil_wr(CSR_CTRL, 32'h0);
+    end
+  endtask
+
+  // ------------------------------------------------------------------
+  // Reset recovery: assert BOTH resets while the backend is mid-flight
+  // (right after a 64-port full-load round), suppress the due-cycle
+  // checks over the wiped in-flight traffic, drop the orphaned
+  // expectations, then restart cleanly.  Previously written data persists
+  // (the model keeps memory across ui_rst, like real DDR).  Also covers
+  // the FSM reset arcs (any state -> IDLE) for coverage.
+  // ------------------------------------------------------------------
+  task automatic test_rst();
+    logic [31:0] rd;
+    int unsigned a, d;
+    begin
+      hades_log("--- RST: mid-flight reset recovery ---");
+      calib_done = 1'b1;
+      csr_enable(2, {64{1'b1}}, 64);
+      // round 0: posted writes (all lands well before the reset)
+      @(negedge port_clk);
+      for (int p = 0; p < N_MAX; p++) begin
+        a = 32'h0000_5000 + 32'(p);
+        d = 32'hD00D_0000 + 32'(p);
+        sram_en[p] <= 1'b1; sram_we[p] <= 1'b1;
+        sram_addr[p] <= a; sram_wdata[p] <= d;
+        hades_mem_write(p, a, d);
+      end
+      // round 1: reads; engines busy when the reset lands right after
+      @(negedge port_clk);
+      for (int p = 0; p < N_MAX; p++) begin
+        a = 32'h0000_5040 + 32'(p);
+        sram_en[p] <= 1'b1; sram_we[p] <= 1'b0; sram_addr[p] <= a;
+        hades_read_expect(p, pcycle + 1 + cur_lat, a);
+      end
+      // suppress checks across the wiped in-flight traffic, reset NOW
+      // (engines are mid-flight), drop orphaned expectations, resume
+      hades_suspend_checks(1);
+      for (int p = 0; p < N_MAX; p++) sram_en[p] <= 1'b0;
+      do_reset();
+      hades_phase_init();
+      hades_suspend_checks(0);
+      calib_done = 1'b1;      // model "recalibrates" after the system reset
+      // restart: re-enable (soft-reset stretch gates READY via polling) and
+      // verify round-0 data survived
+      csr_enable(2, 64'h3, 2);
+      sram_read_burst(0, 16, 32'h5000);
+      sram_read_burst(1, 16, 32'h5000);
+      drain();
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("RST: clean after reset recovery", rd & 32'h3F, 0);
+      axil_wr(CSR_CTRL, 32'h0);
+    end
+  endtask
+
+  // ------------------------------------------------------------------
+  // T13b: port_clk random stop/start and gear jumps between traffic
+  // bursts.  bit4 must set while the clock is stopped and armed; the
+  // enable auto-recovers after restart (no software rewrite); no data
+  // error, no deadlock.  (Stops happen only on drained boundaries — a
+  // stopped clock freezes the target domain by definition.)
+  // ------------------------------------------------------------------
+  task automatic test_t13b();
+    logic [31:0] rd;
+    int unsigned wait_us;
+    begin
+      hades_log("--- T13b: port_clk stop/start + gear jumps ---");
+      calib_done = 1'b1;
+      csr_enable(2, 64'h3, 2);
+      sram_write_burst(0, 16, 32'h3000, 32'hE000_0000);
+      sram_read_burst(0, 16, 32'h3000);
+      drain();
+
+      for (int k = 0; k < 4; k++) begin
+        rnd(60, 80, wait_us);
+        port_clk_stop();
+        repeat (wait_us) #(1_000);   // 60-80 us: past the 55 us stop timeout
+        axil_rd(CSR_ERR_STATUS, rd);
+        hades_check_eq("T13b: bit4 set while stopped", rd & 32'h10, 32'h10);
+        axil_rd(CSR_STATUS, rd);
+        hades_check_eq("T13b: READY dropped", rd & 32'h2, 0);
+        // restart, alternating gear (500 -> 100 -> 500 ...)
+        port_clk_set_khz((k % 2 == 0) ? 100 : 500);
+        port_clk_start();
+        repeat (10) @(posedge port_clk);   // freq_mon re-measures
+        axil_rd(CSR_STATUS, rd);
+        hades_check_eq("T13b: auto-recovered", rd & 32'h3, 32'h3);
+        axil_wr(CSR_ERR_STATUS, 32'h3F);   // clear bit4 for the next round
+        // traffic at this gear: clean
+        sram_write_burst(0, 16, 32'h3100 + 32'(k * 64), 32'hE100_0000);
+        sram_read_burst(0, 16, 32'h3100 + 32'(k * 64));
+        drain();
+        axil_rd(CSR_ERR_STATUS, rd);
+        hades_check_eq("T13b: clean after restart", rd & 32'h3F, 0);
+      end
+      port_clk_set_khz(500);
+      #20_000;
+      axil_wr(CSR_CTRL, 32'h0);
+    end
+  endtask
+
+  // ------------------------------------------------------------------
+  // T13c: over-frequency port_clk (2 MHz) — ENABLE drops/rejects and NO
+  // target-domain response is produced; auto-recovery on restore.
+  // ------------------------------------------------------------------
+  task automatic test_t13c();
+    logic [31:0] rd;
+    begin
+      hades_log("--- T13c: over-freq rejection, no target response ---");
+      calib_done = 1'b1;
+      csr_enable(2, 64'h3, 2);
+      port_clk_set_khz(2000);
+      #10_000;   // ~25 edges: measure + trip
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("T13c: bit4 set (over-freq while armed)", rd & 32'h10, 32'h10);
+      // drive target requests at 2 MHz: no rvalid may appear (monitor
+      // errors on any unexpected rvalid automatically)
+      for (int k = 0; k < 3; k++) begin
+        @(negedge port_clk);
+        sram_en[0] <= 1'b1; sram_we[0] <= 1'b0; sram_addr[0] <= 32'h40;
+        @(negedge port_clk);
+        sram_en[0] <= 1'b0;
+      end
+      repeat (4) @(negedge port_clk);
+      port_clk_set_khz(500);
+      #20_000;
+      axil_wr(CSR_ERR_STATUS, 32'h3F);
+      axil_rd(CSR_STATUS, rd);
+      hades_check_eq("T13c: auto-recovered after restore", rd & 32'h3, 32'h3);
+      sram_write_burst(0, 16, 32'h3200, 32'hE200_0000);
+      sram_read_burst(0, 16, 32'h3200);
+      drain();
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("T13c: clean after recovery", rd & 32'h3F, 0);
+      axil_wr(CSR_CTRL, 32'h0);
+    end
+  endtask
+
+  // ------------------------------------------------------------------
+  // T13d (ASYNC only): metastability coverage.  RTL event simulation has
+  // no analog metastability model; the evidence for "no metastable state
+  // propagates to the outputs" is the whitelist CDC structure plus a
+  // full-load run while the port_clk phase sweeps the whole circle and
+  // the frequency drifts +-0.5% — every crossing is sampled at a
+  // continuously varying, effectively random phase.  Zero errors expected.
+  // ------------------------------------------------------------------
+  task automatic test_t13d();
+    logic [31:0] rd;
+    begin
+      hades_log("--- T13d: ASYNC metastability coverage (phase walk) ---");
+`ifdef ASYNC
+      calib_done = 1'b1;
+      axil_wr(CSR_CTRL, 32'h0);
+      axil_wr(CSR_CFG_MIN_PERIOD, 32'd590);   // below the -0.5% drift floor
+      phase_walk_en = 1'b1;
+      csr_enable(2, {64{1'b1}}, 64);
+      t4_run(64, 96);   // 96 periods = 32 walk steps x 3 periods
+      drain();
+      phase_walk_en = 1'b0;
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("T13d: clean under phase walk + drift", rd & 32'h3F, 0);
+      axil_wr(CSR_CTRL, 32'h0);
+      axil_wr(CSR_CFG_MIN_PERIOD, 32'(TARGET_PERIOD_500K));
+`else
+      hades_log("T13d: SYNC build — covered by T13a/b; skipping");
+`endif
+    end
+  endtask
+`endif   // CSR_STATIC: T10/T12/T13b/c/d are CSR-variant tests; the static
+          // variant covers clock stop/start + over-freq in test_static
+
+
   // ------------------------------------------------------------------
   // T13a (lite): X on CDC paths / inputs must not reach data outputs
   // (full X-propagation and metastability campaign is M5/T13)
@@ -1229,6 +1718,22 @@ module tb_hades_top;
       force dut.g_ports[0].u_port.slot_data_u = 'x;
       repeat (3) @(posedge port_clk);
       release dut.g_ports[0].u_port.slot_data_u;
+
+      // X on the idle AXI R channel (rvalid=0): rdata/rresp may be garbage
+      // in a real MIG when no read is in flight; must not reach the slots
+      force axi_rdata  = 'x;
+      force axi_rresp  = 2'bxx;
+      force axi_rid    = 4'bxxxx;
+      force axi_rvalid = 1'b0;   // protocol level held valid (no phantom read)
+      repeat (3) @(posedge port_clk);
+      release axi_rdata; release axi_rresp; release axi_rid; release axi_rvalid;
+
+      // X on the maintenance handshake acks while idle: the scheduler must
+      // not sample them outside S_REF/S_ZQ
+      force ref_ack = 1'bx;
+      force zq_ack  = 1'bx;
+      repeat (3) @(posedge port_clk);
+      release ref_ack; release zq_ack;
 
       // traffic afterwards must be clean (monitor checks every edge)
       sram_write_burst(0, 16, 32'h8000, 32'h1357_0000);
@@ -1283,12 +1788,19 @@ module tb_hades_top;
       #20_000;
       hades_check_eq("static: ready after restore", stat_ready, 1);
 
-      // 100 KHz gear + full-load subset (static T4/T7 coverage; P_L=2)
+      // 100 KHz gear + full-load subset (static T4/T7 coverage; P_L=2).
+      // PARAM_OVRD: port 3 is shrunk to 128 KiW by the override — cap the
+      // random addresses so every port's map is respected (a plain static
+      // map has every 22-bit address legal by construction).
       cur_lat = 2;
       port_clk_set_khz(100);
       #200_000;                      // freq_mon re-measure (5x10 us periods)
       hades_check_eq("static: ready at 100 KHz", stat_ready, 1);
+`ifdef PARAM_OVRD
+      t4_run(64, 16, 32'h0001_FFFF);
+`else
       t4_run(64, 16);
+`endif
       drain();
       hades_check_eq("static 100KHz full-load: stat_err clean", stat_err, 0);
       port_clk_set_khz(500);
@@ -1343,6 +1855,16 @@ module tb_hades_top;
       hades_phase_init();
       test_t9();
       hades_phase_init();
+      test_t12();
+      hades_phase_init();
+      test_rst();
+      hades_phase_init();
+      test_t13b();
+      hades_phase_init();
+      test_t13c();
+      hades_phase_init();
+      test_t13d();
+      hades_phase_init();
       test_t13a();
 `endif
     end else if (test == "t6_csr")        test_t6_csr();
@@ -1352,7 +1874,21 @@ module tb_hades_top;
     else if (test == "t4") begin calib_done = 1'b1; test_t4();      end
     else if (test == "t5") begin calib_done = 1'b1; test_t5();      end
     else if (test == "t7") begin calib_done = 1'b1; test_t7();      end
+    else if (test == "t8") begin calib_done = 1'b1; test_t8();      end
     else if (test == "t9") begin calib_done = 1'b1; test_t9();      end
+`ifndef CSR_STATIC
+    else if (test == "t12") begin calib_done = 1'b1; test_t12();    end
+    else if (test == "t13b") begin calib_done = 1'b1; test_t13b();  end
+    else if (test == "rst")  begin calib_done = 1'b1; test_rst();   end
+    else if (test == "ovf")  begin calib_done = 1'b1; test_ovf();   end
+    else if (test == "t13c") begin calib_done = 1'b1; test_t13c();  end
+    else if (test == "t13d") begin calib_done = 1'b1; test_t13d();  end
+    else if (test == "t10") begin
+      int t10_per;
+      if (!$value$plusargs("T10_PER=%d", t10_per)) t10_per = 1_000_000;
+      test_t10(t10_per);
+    end
+`endif
     else if (test == "t14") begin                    test_t14();    end
     else if (test == "t13a") begin calib_done = 1'b1; test_t13a();  end
     else if (test == "static_smoke")     test_static();
@@ -1364,35 +1900,18 @@ module tb_hades_top;
     $finish;
   end
 
-  // watchdog (t1 at 1e5 ops needs ~200 ms of simulated time)
+  // watchdog (t1 at 1e5 ops needs ~200 ms; T10 needs ~2.5 s at 1e6 periods)
   initial begin
-    #600_000_000;   // 600 ms
+    int wdog_ms;
+    if (!$value$plusargs("WDOG_MS=%d", wdog_ms)) wdog_ms = 600;
+    #(64'(wdog_ms) * 1_000_000);
     $display("HADES_TEST_FAIL: watchdog timeout");
     $finish;
   end
 
-`ifdef DEBUG_T1
-  // temporary debug probe (M2 bring-up); not part of the test suite
-  always @(posedge ui_clk) begin
-    if (dut.g_ports[0].u_port.rsp_vld)
-      $display("RSP0 t=%0t wrp=%0d vld=%b", $time,
-               dut.g_ports[0].u_port.slot_wr_ptr_u, dut.g_ports[0].u_port.slot_vld_u);
-    if (dut.g_ports[0].u_port.rel_fire_u)
-      $display("CLR0 t=%0t clr=%0d vld=%b", $time,
-               dut.g_ports[0].u_port.rel_slot_u, dut.g_ports[0].u_port.slot_vld_u);
-    if (|dut.p_err_slot)
-      $display("UIEVT t=%0t slot=%h", $time, dut.p_err_slot);
-  end
-  always @(posedge port_clk) begin
-    #(0.001);
-    if (dut.g_ports[0].u_port.sh_rel)
-      $display("REL0 t=%0t pcyc=%0d ptr=%0d", $time, pcycle,
-               dut.g_ports[0].u_port.sh_rel_slot);
-    if (|dut.p_err_window || |dut.p_err_ovf)
-      $display("PCEVT t=%0t pcyc=%0d win=%h ovf=%h", $time, pcycle,
-               dut.p_err_window, dut.p_err_ovf);
-  end
-`endif
+
+
+
 
 endmodule
 

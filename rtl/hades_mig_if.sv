@@ -91,6 +91,7 @@ module hades_mig_if
 
   // error event pulses (CSR latches first-error info)
   output          logic                  err_illegal,   // spec bit0
+  output          logic                  err_timeout,   // spec bit1
   output          logic                  err_slverr,    // spec bit3
   output          logic [7:0]            err_port,
   output          logic [31:0]           err_addr,
@@ -224,7 +225,8 @@ module hades_mig_if
         // one bubble: let the port FIFO pop settle (rempty re-evaluates)
         // before arbitrating again — otherwise the same head is granted twice
         RD_POP: rd_state <= RD_IDLE;
-        default: rd_state <= RD_IDLE;
+        // no default: all 4 encodings are valid states; a unique-case
+        // violation in sim flags X/corruption instead of silently resetting
       endcase
     end
   end
@@ -333,7 +335,7 @@ module hades_mig_if
         end
         // one bubble: let the port FIFO pop settle before arbitrating again
         WR_POP: wr_state <= WR_IDLE;
-        default: wr_state <= WR_IDLE;
+        // no default: unique-case violation in sim flags X/corruption
       endcase
     end
   end
@@ -347,13 +349,29 @@ module hades_mig_if
   // =========================================================================
   // Read-response routing (track FIFO head; synthetic entries pop immediately)
   // =========================================================================
-  wire logic        head_synth = trk_synth[trk_rptr];
-  wire logic        head_bkp   = (trk_port[trk_rptr] == BKP_ID);
-  wire logic        pop_synth  = !trk_empty && head_synth;
-  wire logic        pop_real   = !trk_empty && !head_synth && m_axi_rvalid;
+  // Backend timeout (spec ERR_STATUS.bit1): the tracking head older than
+  // TRK_TIMEOUT ui cycles is popped synthetically (zeros), so the per-port
+  // response-slot bookkeeping stays 1:1 with releases and nothing hangs.
+  // 768 exceeds the worst legal backend latency (~580 at full load incl.
+  // maintenance) yet lands before the L=2 release edge at 500 KHz, so a
+  // one-shot backend failure degrades to a flagged zero instead of a
+  // window violation.  A MIG that returns late-but-alive past the timeout
+  // is outside the legal model (in-order returns would desync) — the bit1
+  // flag is the alarm for exactly that.
+  localparam int TRK_TIMEOUT = 768;
+
   wire logic [7:0]  head_port  = trk_port[trk_rptr];
   wire logic [5:0]  head_lane  = trk_lane[trk_rptr];
-  wire logic [31:0] head_age   = 32'(cyc_cnt - trk_ts[trk_rptr]);
+  // modular 16-bit age: wrap-safe for ages < 32768 (legal max ~136 cycles;
+  // the 768-cycle timeout and every legal latency sit far below the wrap)
+  wire logic [15:0] head_age16 = cyc_cnt - trk_ts[trk_rptr];
+  wire logic [31:0] head_age   = 32'(head_age16);
+  wire logic        head_synth = trk_synth[trk_rptr];
+  wire logic        head_bkp   = (head_port == BKP_ID);
+  wire logic        pop_synth  = !trk_empty && head_synth;
+  wire logic        pop_real   = !trk_empty && !head_synth && m_axi_rvalid;
+  wire logic        pop_tmo    = !trk_empty && !head_synth && !m_axi_rvalid
+                                 && (head_age > 32'(TRK_TIMEOUT));
 
   assign m_axi_rready = !trk_empty && !head_synth;
 
@@ -380,6 +398,15 @@ module hades_mig_if
           rsp_vld [head_port[5:0]] <= 1'b1;
           rsp_data[head_port[5:0]] <= DW'(m_axi_rdata >> (head_lane * DW));
         end
+      end else if (pop_tmo) begin
+        trk_rptr <= trk_rptr + TPW'(1);
+        if (head_bkp) begin
+          bkp_rd_done <= 1'b1;
+          bkp_rd_data <= '0;
+        end else begin
+          rsp_vld [head_port[5:0]] <= 1'b1;
+          rsp_data[head_port[5:0]] <= '0;   // timeout: synthetic zeros
+        end
       end
     end
   end
@@ -394,7 +421,7 @@ module hades_mig_if
       // read tracking: push on AR accept or synthetic inject; pop on response
       unique case ({(rd_state == RD_ISSUE) && m_axi_arvalid && m_axi_arready,
                     (rd_state == RD_SYNTH),
-                    (pop_synth || pop_real)})
+                    (pop_synth || pop_real || pop_tmo)})
         3'b100, 3'b010: trk_cnt <= trk_cnt + 1'b1;
         3'b001:         trk_cnt <= trk_cnt - 1'b1;
         default:        ;                        // push+pop: unchanged
@@ -422,6 +449,7 @@ module hades_mig_if
       port_stat_wr  <= '{default: 32'd0};
       port_stat_err <= '{default: 32'd0};
       err_illegal   <= 1'b0;
+      err_timeout   <= 1'b0;
       err_slverr    <= 1'b0;
       err_port      <= 8'd0;
       err_addr      <= 32'd0;
@@ -429,6 +457,7 @@ module hades_mig_if
     end else begin
       cyc_cnt     <= cyc_cnt + 16'd1;
       err_illegal <= 1'b0;
+      err_timeout <= 1'b0;
       err_slverr  <= 1'b0;
 
       // read issue (totals include the backdoor; per-port stats exclude it)
@@ -461,6 +490,13 @@ module hades_mig_if
       // read response latency
       if (pop_real && head_age > stat_maxlat)
         stat_maxlat <= head_age;
+      // backend timeout (head popped synthetically with zeros)
+      if (pop_tmo) begin
+        err_timeout <= 1'b1;
+        err_port    <= head_port;      // err_addr not meaningful: untouched
+        if (!head_bkp)
+          port_stat_err[head_port[5:0]] <= port_stat_err[head_port[5:0]] + 32'd1;
+      end
       // SLVERR on read or write channels (backdoor: port field = 8'hFF)
       if (pop_real && m_axi_rresp != 2'b00) begin
         err_slverr <= 1'b1;

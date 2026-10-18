@@ -183,6 +183,15 @@ module hades_sram_top
   logic        refresh_active, zq_active;
   logic [31:0] stat_refcnt;
   logic        period_tick;              // maintenance-window head
+  logic        tmo_stky_u, slv_stky_u, ill_stky_u;  // static-mirror stickies
+  logic        mig_err_illegal, mig_err_timeout, mig_err_slverr;
+  logic [7:0]  mig_err_port;
+  logic [31:0] mig_err_addr;
+  logic        soft_port;                // stretched soft reset, port_clk dom.
+  logic        clr_tog_u;                // ui_clk: toggles per err_clr pulse
+  logic [7:0]  clr_port_u;
+  logic        clr_tog_p, clr_tog_pd;    // port_clk domain
+  wire  logic  clr_edge_p = clr_tog_p ^ clr_tog_pd;
 
   // backdoor command interface (from CSR registers or static pins) + engine
   logic                  bkp_cmd_rd, bkp_cmd_wr;
@@ -199,6 +208,12 @@ module hades_sram_top
       logic [7:0]  c_bkp_port;
       logic [39:0] c_bkp_addr;
       logic [31:0] c_bkp_wdata;
+
+      // return path for the soft-reset stretch: the CSR gates ENABLE
+      // (READY reads 0) until the port domain has truly exited reset
+      logic soft_port_u;
+      hades_sync2 u_soft_back (.clk(ui_clk), .rst(ui_rst),
+                               .d(soft_port), .q(soft_port_u));
 
       hades_csr #(
         .IS_SYNC (IS_SYNC),
@@ -229,6 +244,7 @@ module hades_sram_top
         .meas_period     (meas_period),
         .refresh_active  (refresh_active),
         .zq_active       (zq_active),
+        .port_rst_busy   (soft_port_u),
         .err_in          (err_in),
         .err_in_port     (err_in_port),
         .err_in_addr     (err_in_addr),
@@ -303,15 +319,29 @@ module hades_sram_top
       assign stat_refresh_active = refresh_active;
       assign stat_zq_active      = zq_active;
       // level-style mirror of ERR_STATUS: bit4 = enable withheld (clock
-      // unhealthy); bit2/5 sticky-since-reset error accumulation
+      // unhealthy); bits 1-3/5 sticky-since-reset error accumulation
       assign stat_err = {2'b00,
                          win_stky_any,              // bit5
                          ~(clk_running & ~over_freq), // bit4
-                         1'b0,                       // bit3 (M5: SLVERR)
+                         slv_stky_u,                 // bit3
                          ovf_stky_any,               // bit2
-                         2'b00};                     // bits 1:0
+                         tmo_stky_u,                 // bit1
+                         ill_stky_u};                // bit0
     end
   endgenerate
+
+  // sticky backend-error flags for the static stat_err mirror
+  always_ff @(posedge ui_clk) begin
+    if (ui_rst) begin
+      tmo_stky_u <= 1'b0;
+      slv_stky_u <= 1'b0;
+      ill_stky_u <= 1'b0;
+    end else begin
+      if (mig_err_timeout) tmo_stky_u <= 1'b1;
+      if (mig_err_slverr)  slv_stky_u <= 1'b1;
+      if (mig_err_illegal) ill_stky_u <= 1'b1;
+    end
+  end
 
   // ------------------------------------------------------------------
   // Soft reset: 1-cycle ui strobe; stretched + synced into port_clk domain
@@ -333,7 +363,6 @@ module hades_sram_top
     end
   end
 
-  logic soft_port;   // stretched soft reset, port_clk domain
   hades_sync2 u_soft_sync (.clk(port_clk), .rst(port_rst), .d(soft_lvl), .q(soft_port));
   wire logic port_rst_eff = port_rst | soft_port;
   wire logic ui_rst_soft  = ui_rst | soft_reset_stb;
@@ -363,10 +392,6 @@ module hades_sram_top
   logic [BASE_W-1:0]     bk_wr_beat;
   logic [5:0]            bk_wr_lane;
   logic [DW-1:0]         bk_wr_data;
-
-  logic                  mig_err_illegal, mig_err_slverr;
-  logic [7:0]            mig_err_port;
-  logic [31:0]           mig_err_addr;
 
   hades_arbiter #(
     .N       (N),
@@ -442,6 +467,7 @@ module hades_sram_top
     .err_clr       (port_err_clr),
     .soft_rst      (soft_reset_stb),
     .err_illegal   (mig_err_illegal),
+    .err_timeout   (mig_err_timeout),
     .err_slverr    (mig_err_slverr),
     .err_port      (mig_err_port),
     .err_addr      (mig_err_addr),
@@ -494,7 +520,9 @@ module hades_sram_top
   // ------------------------------------------------------------------
   // Emulated port array
   // ------------------------------------------------------------------
-  logic [N-1:0] p_err_window, p_err_ovf, p_err_slot;
+  logic [N-1:0] p_err_slot;
+  logic [N-1:0] win_tog_p, ovf_tog_p;   // port_clk event toggles (from ports)
+  logic [N-1:0] win_stky,  ovf_stky;    // port_clk sticky levels (from ports)
 
   for (genvar i = 0; i < N; i++) begin : g_ports
     hades_port #(
@@ -524,32 +552,29 @@ module hades_sram_top
       .wr_gnt     (p_wr_gnt[i]),
       .rsp_vld    (p_rsp_vld[i]),
       .rsp_data   (p_rsp_data[i]),
-      .err_window (p_err_window[i]),
-      .err_ovf    (p_err_ovf[i]),
-      .err_slot   (p_err_slot[i])
+      .err_win_tog  (win_tog_p[i]),
+      .err_ovf_tog  (ovf_tog_p[i]),
+      .err_win_stky (win_stky[i]),
+      .err_ovf_stky (ovf_stky[i]),
+      .err_slot     (p_err_slot[i]),
+      .err_clr      (clr_edge_p && clr_port_u == 8'(i))
     );
   end
 
   // ------------------------------------------------------------------
   // Error-event plumbing
-  //  - window/overflow pulses are port_clk-domain.  They cross to ui_clk
-  //    as per-port EVENT toggles (one flip per violation, same scheme as
-  //    the release events in hades_port); the ui side edge-detects them
-  //    into 1-cycle pulses.  ERR_STATUS bits 2/5 are set by these pulses,
-  //    so a W1C clear sticks (a level source would re-set the bit until
-  //    the port-side sticky is also cleared).  Violations on one port are
-  //    >= 1 target period apart, so no toggle event can be lost.
-  //  - the sticky levels remain for the static-variant stat_err mirror
-  //    (cleared by port reset or the CSR indexed W1C clear crossing).
+  //  - window/overflow records are kept per port inside hades_port (sticky
+  //    level for the static pin mirror + event toggle).  The toggles cross
+  //    to ui_clk through sync2 + edge detect into 1-cycle pulses; ERR_STATUS
+  //    bits 2/5 are set by these pulses, so a W1C clear sticks (a level
+  //    source would re-set the bit until the port-side sticky is cleared).
+  //  - the sticky levels cross quasi-statically for the static mirror and
+  //    are cleared in place by the CSR indexed W1C clear crossing below.
   //  - slot-overflow pulses are already ui_clk-domain pulses.
   // ------------------------------------------------------------------
-  logic [N-1:0] win_stky, ovf_stky, slot_stky;
-  logic [N-1:0] win_tog_p, ovf_tog_p;   // port_clk event toggles
+  logic         slot_stky_u;             // ui_clk sticky (any port's slot ovf)
   logic [N-1:0] win_lvl_u, ovf_lvl_u;   // ui_clk synced levels
   logic [N-1:0] win_dl_u, ovf_dl_u;     // ui_clk delayed (edge detect)
-  logic         clr_tog_u;              // ui_clk: toggles per err_clr pulse
-  logic [7:0]   clr_port_u;
-  logic         clr_tog_p, clr_tog_pd;  // port_clk domain
 
   wire logic [N-1:0] win_evt_u = win_lvl_u ^ win_dl_u;
   wire logic [N-1:0] ovf_evt_u = ovf_lvl_u ^ ovf_dl_u;
@@ -570,30 +595,21 @@ module hades_sram_top
     if (port_rst) clr_tog_pd <= 1'b0;
     else          clr_tog_pd <= clr_tog_p;
   end
-  wire logic clr_edge_p = clr_tog_p ^ clr_tog_pd;
+
+  // ui_clk-domain slot-overflow sticky (cleared by any indexed W1C clear);
+  // the set path is a fault-only sentinel — unreachable in legal operation
+  // (the slot budget guarantees a slot is free at every response); excluded
+  // from coverage with justification in sim/cov_excl.el
+  always_ff @(posedge ui_clk) begin
+    if (ui_rst_soft) begin
+      slot_stky_u <= 1'b0;
+    end else begin
+      if (|p_err_slot)   slot_stky_u <= 1'b1;
+      if (port_err_clr)  slot_stky_u <= 1'b0;
+    end
+  end
 
   for (genvar i = 0; i < N; i++) begin : g_err_stky
-    always_ff @(posedge port_clk) begin
-      if (port_rst_eff) begin
-        win_stky[i]  <= 1'b0;
-        ovf_stky[i]  <= 1'b0;
-        win_tog_p[i] <= 1'b0;
-        ovf_tog_p[i] <= 1'b0;
-      end else begin
-        if (p_err_window[i]) begin
-          win_stky[i]  <= 1'b1;
-          win_tog_p[i] <= ~win_tog_p[i];
-        end
-        if (p_err_ovf[i]) begin
-          ovf_stky[i]  <= 1'b1;
-          ovf_tog_p[i] <= ~ovf_tog_p[i];
-        end
-        if (clr_edge_p && clr_port_u == 8'(i)) begin
-          win_stky[i] <= 1'b0;
-          ovf_stky[i] <= 1'b0;
-        end
-      end
-    end
     hades_sync2 u_win_evt (.clk(ui_clk), .rst(ui_rst_soft),
                            .d(win_tog_p[i]), .q(win_lvl_u[i]));
     hades_sync2 u_ovf_evt (.clk(ui_clk), .rst(ui_rst_soft),
@@ -602,12 +618,9 @@ module hades_sram_top
       if (ui_rst_soft) begin
         win_dl_u[i]  <= 1'b0;
         ovf_dl_u[i]  <= 1'b0;
-        slot_stky[i] <= 1'b0;
       end else begin
         win_dl_u[i] <= win_lvl_u[i];
         ovf_dl_u[i] <= ovf_lvl_u[i];
-        if (p_err_slot[i]) slot_stky[i] <= 1'b1;
-        if (port_err_clr && port_sel == 8'(i)) slot_stky[i] <= 1'b0;
       end
     end
   end
@@ -635,7 +648,7 @@ module hades_sram_top
   endfunction
 
   assign win_stky_any = |win_stky_q;
-  assign ovf_stky_any = |ovf_stky_q | (|slot_stky);
+  assign ovf_stky_any = |ovf_stky_q | slot_stky_u;
 
   // Event blanking after SOFT_RESET: the ui_clk side of the event toggles
   // resets with ui_rst_soft, but the port_clk toggles clear only after the
@@ -654,7 +667,7 @@ module hades_sram_top
 
   always_comb begin
     err_in[0] = mig_err_illegal;
-    err_in[1] = 1'b0;                       // backend timeout: M5
+    err_in[1] = mig_err_timeout;
     err_in[2] = evt_en & ((|ovf_evt_u) | (|p_err_slot));
     err_in[3] = mig_err_slverr;
     err_in[4] = evt_en & (|win_evt_u);
@@ -663,6 +676,8 @@ module hades_sram_top
     if (mig_err_illegal || mig_err_slverr) begin
       err_in_port = mig_err_port;
       err_in_addr = mig_err_addr;
+    end else if (mig_err_timeout) begin
+      err_in_port = mig_err_port;      // timeout has no address; keep 0
     end
   end
 

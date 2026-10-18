@@ -13,9 +13,17 @@
 //   - sparse 64-bit-byte-addressable memory (associative), WSTRB honored
 //   - strictly in-order read returns (DUT uses a single AXI ID)
 // Run-time knobs (plusargs):
-//   +MAINT_STRESS=1  T3 worst case: every refresh drags a periodic-read
-//                    block into the same maintenance window
-//   +RD_LAT_ADD=n    T14 fault injection: stretch every read latency by n
+//   +MAINT_STRESS=1      T3 worst case: every refresh drags a periodic-read
+//                        block into the same maintenance window
+//   +RD_LAT_ADD=n        T14 fault injection: stretch every read latency by n
+//   +DROP_RD_BEAT=h      T8: the first read to this 512-bit beat never
+//                        returns (backend timeout path)
+//   +DROP_RD_BEAT2=h     T8: ditto, second independent one-shot (used for
+//                        the backdoor timeout leg)
+//   +SLVERR_RD_BEAT=h    T8: the first read to this beat returns rresp=SLVERR
+//   +SLVERR_WR_BEAT=h    T8: the first write to this beat gets bresp=SLVERR
+//   +AR_STALL_LEN=n      T-ovf: arready held 0 for n ui cycles starting at
+//                        the first ARVALID (port request-FIFO overflow path)
 // SLVERR/timeout fault injection arrives with T8 in M5.
 //-----------------------------------------------------------------------------
 `timescale 1ns/1ps
@@ -85,15 +93,37 @@ module mig_axi4_model #(
   // run-time fault/stress knobs (see file header)
   int unsigned rd_lat_add;
   int unsigned maint_stress;
+  longint unsigned drop_beat, slv_rd_beat, slv_wr_beat, drop_beat2;
+  int unsigned ar_stall_len;
+  bit drop_en, slv_rd_en, slv_wr_en, drop2_en;
+  bit drop_done, slv_rd_done, slv_wr_done, drop2_done;   // 2-state: default 0
+  bit stall_started;                        // 2-state: default 0
+  longint unsigned stall_until;
   initial begin
     rd_lat_add   = 0;
     maint_stress = 0;
+    ar_stall_len = 0;
     void'($value$plusargs("RD_LAT_ADD=%d", rd_lat_add));
     void'($value$plusargs("MAINT_STRESS=%d", maint_stress));
+    void'($value$plusargs("AR_STALL_LEN=%d", ar_stall_len));
+    drop_en   = $value$plusargs("DROP_RD_BEAT=%h", drop_beat);
+    drop2_en  = $value$plusargs("DROP_RD_BEAT2=%h", drop_beat2);
+    slv_rd_en = $value$plusargs("SLVERR_RD_BEAT=%h", slv_rd_beat);
+    slv_wr_en = $value$plusargs("SLVERR_WR_BEAT=%h", slv_wr_beat);
     if (rd_lat_add != 0)
       $display("[MIG-MODEL] RD_LAT_ADD=%0d (T14 latency-stretch fault)", rd_lat_add);
     if (maint_stress != 0)
       $display("[MIG-MODEL] MAINT_STRESS=1 (T3 worst-case maintenance)");
+    if (ar_stall_len != 0)
+      $display("[MIG-MODEL] AR_STALL_LEN=%0d (overflow fault)", ar_stall_len);
+    if (drop_en)
+      $display("[MIG-MODEL] DROP_RD_BEAT=%h (T8 timeout fault)", drop_beat);
+    if (drop2_en)
+      $display("[MIG-MODEL] DROP_RD_BEAT2=%h (T8 timeout fault)", drop_beat2);
+    if (slv_rd_en)
+      $display("[MIG-MODEL] SLVERR_RD_BEAT=%h (T8 SLVERR fault)", slv_rd_beat);
+    if (slv_wr_en)
+      $display("[MIG-MODEL] SLVERR_WR_BEAT=%h (T8 SLVERR fault)", slv_wr_beat);
   end
 
   // request-driven maintenance (ref/ZQ acks), busy-until accounting so
@@ -139,7 +169,8 @@ module mig_axi4_model #(
   // ------------------------------------------------------------------
   // read channel: accept -> due-cycle queue -> in-order return
   // ------------------------------------------------------------------
-  typedef struct packed { longint unsigned due; logic [39:0] addr; } rd_ent_t;
+  typedef struct packed { longint unsigned due; logic [39:0] addr;
+                          logic [1:0] resp; } rd_ent_t;
   rd_ent_t rd_q[$];
 
   // registered ready/accept flags (queue size() is not legal in continuous
@@ -149,8 +180,16 @@ module mig_axi4_model #(
       s_axi_arready <= 1'b0;
       s_axi_awready <= 1'b0;
       s_axi_wready  <= 1'b0;
+      stall_started <= 1'b0;
     end else begin
-      s_axi_arready <= !maint && (rd_q.size() < MAX_OUT);
+      if (ar_stall_len != 0 && !stall_started && s_axi_arvalid) begin
+        stall_started <= 1'b1;
+        stall_until   <= cyc + ar_stall_len;
+        $display("[MIG-MODEL] AR stall starts at cycle %0d (%0d cycles)",
+                 cyc, ar_stall_len);
+      end
+      s_axi_arready <= !maint && (rd_q.size() < MAX_OUT)
+                       && !(stall_started && cyc < stall_until);
       s_axi_awready <= !maint;
       s_axi_wready  <= !maint && (aw_q.size() > 0);
     end
@@ -172,11 +211,29 @@ module mig_axi4_model #(
     end else if (s_axi_arvalid && s_axi_arready) begin
       rd_ent_t e;
       longint unsigned lat;
-      lat = RD_LAT_TYP + (m_rnd(99) < ROW_HIT_PROB_PCT ? ROW_LAT : 0)
-            + m_rnd(RD_JITTER) + rd_lat_add;
-      e.due  = cyc + lat;
-      e.addr = s_axi_araddr;
-      rd_q.push_back(e);
+      longint unsigned beat;
+      beat = s_axi_araddr >> 6;
+      if (drop_en && !drop_done && beat == drop_beat) begin
+        // swallowed by the backend: no queue entry, never returns
+        drop_done <= 1'b1;
+        $display("[MIG-MODEL] T8: dropped read beat 0x%h at cycle %0d", beat, cyc);
+      end else if (drop2_en && !drop2_done && beat == drop_beat2) begin
+        drop2_done <= 1'b1;
+        $display("[MIG-MODEL] T8: dropped read beat2 0x%h at cycle %0d", beat, cyc);
+      end else begin
+        lat = RD_LAT_TYP + (m_rnd(99) < ROW_HIT_PROB_PCT ? ROW_LAT : 0)
+              + m_rnd(RD_JITTER) + rd_lat_add;
+        e.due  = cyc + lat;
+        e.addr = s_axi_araddr;
+        e.resp = (slv_rd_en && !slv_rd_done && beat == slv_rd_beat) ? 2'b10
+                                                                     : 2'b00;
+        if (e.resp != 2'b00) begin
+          slv_rd_done <= 1'b1;
+          $display("[MIG-MODEL] T8: SLVERR on read beat 0x%h at cycle %0d",
+                   beat, cyc);
+        end
+        rd_q.push_back(e);
+      end
     end
   end
 
@@ -196,13 +253,15 @@ module mig_axi4_model #(
       end else if (!r_held && !maint && rd_q.size() > 0 && rd_q[0].due <= cyc) begin
         rd_ent_t e;
         longint unsigned beat;
+        logic [511:0] mdata;
         e = rd_q.pop_front();
         beat = e.addr >> 6;
-        s_axi_rdata  <= mem.exists(beat) ? mem[beat] : 512'd0;
+        mdata = mem.exists(beat) ? mem[beat] : 512'd0;
+        s_axi_rdata  <= mdata;
         s_axi_rvalid <= 1'b1;
         s_axi_rlast  <= 1'b1;
         s_axi_rid    <= 4'd0;
-        s_axi_rresp  <= 2'b00;
+        s_axi_rresp  <= e.resp;
         r_held       <= 1'b1;
       end
     end
@@ -212,7 +271,8 @@ module mig_axi4_model #(
   // write channel: AW queue, W applies on wlast, B after WR_LAT
   // ------------------------------------------------------------------
   logic [39:0] aw_q[$];
-  longint unsigned b_due_q[$];
+  typedef struct packed { longint unsigned due; logic [1:0] resp; } b_ent_t;
+  b_ent_t b_due_q[$];
 
   always_ff @(posedge aclk) begin
     if (arst) begin
@@ -224,12 +284,21 @@ module mig_axi4_model #(
       if (s_axi_wvalid && s_axi_wready && s_axi_wlast) begin
         longint unsigned beat;
         logic [511:0] cur;
+        b_ent_t be;
         beat = aw_q.pop_front() >> 6;
         cur  = mem.exists(beat) ? mem[beat] : 512'd0;
         for (int b = 0; b < 64; b++)
           if (s_axi_wstrb[b]) cur[b*8 +: 8] = s_axi_wdata[b*8 +: 8];
         mem[beat] = cur;
-        b_due_q.push_back(cyc + WR_LAT);
+        be.due  = cyc + WR_LAT;
+        be.resp = (slv_wr_en && !slv_wr_done && beat == slv_wr_beat) ? 2'b10
+                                                                      : 2'b00;
+        if (be.resp != 2'b00) begin
+          slv_wr_done <= 1'b1;
+          $display("[MIG-MODEL] T8: SLVERR on write beat 0x%h at cycle %0d",
+                   beat, cyc);
+        end
+        b_due_q.push_back(be);
       end
     end
   end
@@ -242,9 +311,11 @@ module mig_axi4_model #(
     end else begin
       if (s_axi_bvalid && s_axi_bready)
         s_axi_bvalid <= 1'b0;
-      else if (!s_axi_bvalid && b_due_q.size() > 0 && b_due_q[0] <= cyc) begin
-        void'(b_due_q.pop_front());
+      else if (!s_axi_bvalid && b_due_q.size() > 0 && b_due_q[0].due <= cyc) begin
+        b_ent_t be;
+        be = b_due_q.pop_front();
         s_axi_bvalid <= 1'b1;
+        s_axi_bresp  <= be.resp;
       end
     end
   end
@@ -269,6 +340,7 @@ module mig_axi4_model #(
   // Randomness comes from m_rnd (xorshift32, static state): xsim supports
   // neither $urandom(seed) nor $urandom_range in all contexts; the fixed
   // seed makes both simulators reproducible.
+
 
 endmodule
 
