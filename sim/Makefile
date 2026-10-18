@@ -6,7 +6,9 @@
 #   make clean
 #
 # Variants:  csr (CSR_EN=1 SYNC) | csr_async (CSR_EN=1 ASYNC) |
-#            static (CSR_EN=0 SYNC) | ovrd (CSR_EN=0 SYNC + param override)
+#            static (CSR_EN=0 SYNC) | ovrd (CSR_EN=0 SYNC + param override) |
+#            st (CSR_EN=1 SYNC + SELFTEST_EN=1: TEST=selftest smoke + a t2
+#            pins-transparent sanity run)
 # Extra runs per csr/csr_async/static build: T3 with +MAINT_STRESS=1 (worst
 # maintenance alignment), T14 with +RD_LAT_ADD=1500 (bit5 sentinel fault),
 # T8 with +DROP_RD_BEAT/+SLVERR_RD_BEAT/+SLVERR_WR_BEAT (error paths).
@@ -20,7 +22,8 @@ VIVADO_BIN := $(VIVADO)/bin
 BUILD    := build
 
 RTL := ../rtl/hades_pkg.sv ../rtl/hades_cdc.sv ../rtl/hades_freq_mon.sv \
-       ../rtl/hades_csr.sv ../rtl/hades_port.sv ../rtl/hades_timing_shaper.sv \
+       ../rtl/hades_selftest.sv ../rtl/hades_csr.sv ../rtl/hades_port.sv \
+       ../rtl/hades_timing_shaper.sv \
        ../rtl/hades_mig_if.sv ../rtl/hades_refresh_sched.sv \
        ../rtl/hades_arbiter.sv ../rtl/hades_backdoor.sv ../rtl/hades_sram_top.sv
 TB  := tb/tb_hades_top.sv
@@ -50,13 +53,15 @@ DEF_csr       :=
 DEF_csr_async := +define+ASYNC
 DEF_static    := +define+CSR_STATIC
 DEF_ovrd      := +define+CSR_STATIC+PARAM_OVRD
+DEF_st        := +define+SELFTEST
 
 TEST_csr       := all_csr
 TEST_csr_async := all_csr
 TEST_static    := all_static
 TEST_ovrd      := all_static
+TEST_st        := selftest
 
-VCS_VARIANTS := csr csr_async static ovrd
+VCS_VARIANTS := csr csr_async static ovrd st
 
 $(BUILD)/vcs_%/simv: $(RTL) $(TB) $(MDL) $(CPP)
 	@mkdir -p $(@D)
@@ -67,7 +72,7 @@ $(BUILD)/vcs_%/simv: $(RTL) $(TB) $(MDL) $(CPP)
 test-vcs: $(foreach v,$(VCS_VARIANTS),$(BUILD)/vcs_$(v)/simv)
 	@fail=0; \
 	for v in $(VCS_VARIANTS); do \
-	  t=$(TEST_csr); [ $$v = csr ] || [ $$v = csr_async ] && t=all_csr || t=all_static; \
+	  case $$v in static|ovrd) t=all_static;; st) t=selftest;; *) t=all_csr;; esac; \
 	  echo "=== VCS $$v TEST=$$t OPS=$(OPS_vcs) ==="; \
 	  ./$(BUILD)/vcs_$$v/simv +TEST=$$t +OPS=$(OPS_vcs) > $(BUILD)/vcs_$$v/run.log 2>&1; \
 	  grep -E "HADES-TB\] (FAIL|checks)" $(BUILD)/vcs_$$v/run.log | tail -8; \
@@ -101,6 +106,11 @@ test-vcs: $(foreach v,$(VCS_VARIANTS),$(BUILD)/vcs_$(v)/simv)
 	grep -q HADES_TEST_PASS $(BUILD)/vcs_csr/run_ovf.log \
 	  && echo "VCS csr ovf: PASS" \
 	  || { echo "VCS csr ovf: FAIL (see $(BUILD)/vcs_csr/run_ovf.log)"; fail=1; }; \
+	echo "=== VCS st TEST=t2 (engine idle: pins transparent) ==="; \
+	./$(BUILD)/vcs_st/simv +TEST=t2 > $(BUILD)/vcs_st/run_t2.log 2>&1; \
+	grep -q HADES_TEST_PASS $(BUILD)/vcs_st/run_t2.log \
+	  && echo "VCS st t2: PASS" \
+	  || { echo "VCS st t2: FAIL (see $(BUILD)/vcs_st/run_t2.log)"; fail=1; }; \
 	echo "=== VCS csr TEST=t10 T10_PER=1000000 (long regression) ==="; \
 	./$(BUILD)/vcs_csr/simv +TEST=t10 +T10_PER=1000000 +WDOG_MS=4000 \
 	  > $(BUILD)/vcs_csr/run_t10.log 2>&1; \
@@ -130,13 +140,14 @@ XSIM_DEF_csr       :=
 XSIM_DEF_csr_async := --define ASYNC
 XSIM_DEF_static    := --define CSR_STATIC
 XSIM_DEF_ovrd      := --define CSR_STATIC --define PARAM_OVRD
+XSIM_DEF_st        := --define SELFTEST
 
-XSIM_VARIANTS := csr csr_async static ovrd
+XSIM_VARIANTS := csr csr_async static ovrd st
 
 test-xsim: $(foreach v,$(XSIM_VARIANTS),$(BUILD)/xsim_$(v)/snap)
 	@fail=0; \
 	for v in $(XSIM_VARIANTS); do \
-	  t=all_static; [ $$v = csr ] || [ $$v = csr_async ] && t=all_csr; \
+	  case $$v in static|ovrd) t=all_static;; st) t=selftest;; *) t=all_csr;; esac; \
 	  echo "=== xsim $$v TEST=$$t OPS=$(OPS_xsim) ==="; \
 	  cd $(BUILD)/xsim_$$v && $(VIVADO_BIN)/xsim snap -R -testplusarg TEST=$$t \
 	    -testplusarg OPS=$(OPS_xsim) > run.log 2>&1; cd ../..; \
@@ -175,6 +186,12 @@ test-xsim: $(foreach v,$(XSIM_VARIANTS),$(BUILD)/xsim_$(v)/snap)
 	grep -q HADES_TEST_PASS $(BUILD)/xsim_csr/run_ovf.log \
 	  && echo "xsim csr ovf: PASS" \
 	  || { echo "xsim csr ovf: FAIL (see $(BUILD)/xsim_csr/run_ovf.log)"; fail=1; }; \
+	echo "=== xsim st TEST=t2 (engine idle: pins transparent) ==="; \
+	cd $(BUILD)/xsim_st && $(VIVADO_BIN)/xsim snap -R -testplusarg TEST=t2 \
+	  > run_t2.log 2>&1; cd ../..; \
+	grep -q HADES_TEST_PASS $(BUILD)/xsim_st/run_t2.log \
+	  && echo "xsim st t2: PASS" \
+	  || { echo "xsim st t2: FAIL (see $(BUILD)/xsim_st/run_t2.log)"; fail=1; }; \
 	echo "=== xsim csr TEST=t10 T10_PER=50000 (reduced) ==="; \
 	cd $(BUILD)/xsim_csr && $(VIVADO_BIN)/xsim snap -R -testplusarg TEST=t10 \
 	  -testplusarg T10_PER=50000 -testplusarg WDOG_MS=300 > run_t10.log 2>&1; cd ../..; \
@@ -227,13 +244,17 @@ cov: $(COVDIR)/simv $(COVDIRS)/simv
 	@python3 cov_check.py $(COVDIR)/urg/modlist.txt
 
 lint:
-	@mkdir -p $(BUILD)/lint_csr $(BUILD)/lint_static
+	@mkdir -p $(BUILD)/lint_csr $(BUILD)/lint_static $(BUILD)/lint_st
 	cd $(BUILD)/lint_csr    && $(VIVADO_BIN)/xvlog --sv $(RTL_ABS) > compile.log 2>&1 \
 	  && $(VIVADO_BIN)/xelab --timescale 1ns/1ps hades_sram_top -generic_top "CSR_EN=1" >> compile.log 2>&1 \
 	  && echo "lint csr:    ELAB OK" || { echo "lint csr FAILED"; tail -20 compile.log; exit 1; }
 	cd $(BUILD)/lint_static && $(VIVADO_BIN)/xvlog --sv $(RTL_ABS) > compile.log 2>&1 \
 	  && $(VIVADO_BIN)/xelab --timescale 1ns/1ps hades_sram_top -generic_top "CSR_EN=0" >> compile.log 2>&1 \
 	  && echo "lint static: ELAB OK" || { echo "lint static FAILED"; tail -20 compile.log; exit 1; }
+	cd $(BUILD)/lint_st     && $(VIVADO_BIN)/xvlog --sv $(RTL_ABS) > compile.log 2>&1 \
+	  && $(VIVADO_BIN)/xelab --timescale 1ns/1ps hades_sram_top -generic_top "CSR_EN=1" \
+	    -generic_top "SELFTEST_EN=1" >> compile.log 2>&1 \
+	  && echo "lint st:     ELAB OK (SELFTEST_EN=1)" || { echo "lint st FAILED"; tail -20 compile.log; exit 1; }
 
 check_bounds:
 	@mkdir -p $(BUILD)/bounds

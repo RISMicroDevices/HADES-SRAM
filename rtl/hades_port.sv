@@ -23,7 +23,12 @@ module hades_port
 #(
   parameter int AW      = AW_DEFAULT,
   parameter int DW      = DW_DEFAULT,
-  parameter bit IS_SYNC = 1'b1
+  parameter bit IS_SYNC = 1'b1,
+  // M5-hw on-chip self-test (spec 6.2): 0 = absent (default), 1 = hades_selftest
+  // engine instantiated; it drives the request inputs while st_run is active
+  parameter bit SELFTEST_EN  = 1'b0,
+  parameter int PORT_ID      = 0,     // PRBS seed discriminator
+  parameter int SELFTEST_BLK = 256    // words written+read per pass
 ) (
   // ---- target domain (port_clk) ----
   input  wire logic           port_clk,
@@ -39,6 +44,10 @@ module hades_port
   input  wire logic           cfg_en,     // this port enabled
   input  wire logic [1:0]     cfg_lat,    // L
   input  wire logic           enabled,    // global effective enable
+
+  // ---- on-chip self-test (used only when SELFTEST_EN=1) ----
+  input  wire logic           st_run,     // run level (ui_clk domain; synced inside)
+  output      logic           err_st_tog, // toggle per selftest error event
 
   // ---- host domain (ui_clk): request/response handshake with mig_if ----
   input  wire logic           ui_clk,
@@ -87,10 +96,25 @@ module hades_port
   logic        rel_d_u;
   logic        rel_fire_u;                  // 1 ui_clk cycle per release
 
+  // self-test stimulus mux (SELFTEST_EN builds): while the engine is active
+  // it drives the request inputs instead of the integrator pins
+  logic        st_active;
+  logic        st_req_en, st_req_we;
+  logic [AW-1:0] st_req_addr;
+  logic [DW-1:0] st_req_wdata;
+  logic        req_en, req_we;
+  logic [AW-1:0] req_addr;
+  logic [DW-1:0] req_wdata;
+
+  assign req_en    = st_active ? st_req_en    : en;
+  assign req_we    = st_active ? st_req_we    : we;
+  assign req_addr  = st_active ? st_req_addr  : addr;
+  assign req_wdata = st_active ? st_req_wdata : wdata;
+
   // request accepted only when the port is live
-  assign accept   = en & cfg_en & enabled;
-  assign rd_req_p = accept & ~we;
-  assign wr_req_p = accept &  we;
+  assign accept   = req_en & cfg_en & enabled;
+  assign rd_req_p = accept & ~req_we;
+  assign wr_req_p = accept &  req_we;
 
   // =========================================================================
   // Read request FIFO (port_clk -> ui_clk), depth 8
@@ -99,7 +123,7 @@ module hades_port
     .wclk   (port_clk),
     .wrst   (port_rst),
     .wpush  (rd_req_p),
-    .wdata  (addr),
+    .wdata  (req_addr),
     .wfull  (rd_full),
     .rclk   (ui_clk),
     .rrst   (ui_rst),
@@ -116,7 +140,7 @@ module hades_port
     .wclk   (port_clk),
     .wrst   (port_rst),
     .wpush  (wr_req_p),
-    .wdata  ({addr, wdata}),
+    .wdata  ({req_addr, req_wdata}),
     .wfull  (wr_full),
     .rclk   (ui_clk),
     .rrst   (ui_rst),
@@ -262,6 +286,44 @@ module hades_port
 
   // IS_SYNC is carried for constraints/CDC_OVHD accounting; the structure is
   // identical for both CLK_MODEs (the whitelist is a superset of SYNC needs).
+
+  // =========================================================================
+  // On-chip self-test (M5-hw, spec 6.2).  Only elaborated when SELFTEST_EN=1;
+  // otherwise the request mux selects the integrator pins and the error
+  // toggle ties off — zero functional and timing difference.
+  // =========================================================================
+  if (SELFTEST_EN) begin : g_selftest
+    hades_selftest #(
+      .AW      (AW),
+      .DW      (DW),
+      .PORT_ID (PORT_ID),
+      .BLK     (SELFTEST_BLK)
+    ) u_selftest (
+      .port_clk   (port_clk),
+      .port_rst   (port_rst),
+      .run        (st_run),
+      .port_live  (cfg_en & enabled),
+      .lat        (cfg_lat),
+      .active     (st_active),
+      .req_en     (st_req_en),
+      .req_we     (st_req_we),
+      .req_addr   (st_req_addr),
+      .req_wdata  (st_req_wdata),
+      .chk_rd_req (rd_req_p),
+      .rvalid     (rvalid),
+      .rdata      (rdata),
+      .err_tog    (err_st_tog)
+    );
+  end else begin : g_no_selftest
+    assign st_active    = 1'b0;
+    assign st_req_en    = 1'b0;
+    assign st_req_we    = 1'b0;
+    assign st_req_addr  = '0;
+    assign st_req_wdata = '0;
+    assign err_st_tog   = 1'b0;
+    logic unused_st;
+    assign unused_st = &{1'b0, st_run};
+  end
 
 endmodule
 

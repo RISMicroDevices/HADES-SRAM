@@ -27,7 +27,8 @@ module hades_csr
   parameter bit IS_SYNC = 1'b1,   // 1: CLK_MODE SYNC, 0: ASYNC (PARAMS.bit31)
   parameter int DW            = DW_DEFAULT,
   parameter int UI_MHZ        = UI_CLK_MHZ,
-  parameter int PORT_MB       = PORT_MB_DEFAULT
+  parameter int PORT_MB       = PORT_MB_DEFAULT,
+  parameter bit SELFTEST_EN   = 1'b0   // CTRL.SELFTEST implemented (M5-hw)
 ) (
   input  wire logic        ui_clk,
   input  wire logic        ui_rst,
@@ -83,6 +84,7 @@ module hades_csr
   output          logic         soft_reset_stb,
   output          logic         port_err_clr,   // 1-cycle pulse, port = port_sel_o
   output          logic [7:0]   port_sel_o,
+  output          logic         selftest_run,   // CTRL.SELFTEST (0 when !SELFTEST_EN)
 
   // backdoor command channel (M4): registers here, engine in hades_backdoor
   output          logic         bkp_go_rd,      // 1-cycle strobes
@@ -119,6 +121,7 @@ module hades_csr
   logic [39:0]                   bkp_addr_q;
   logic [31:0]                   bkp_wdata_q;
   logic                          bkp_done_stky;   // set by engine, cleared by new cmd
+  logic                          selftest_req;    // CTRL.bit2 shadow
 
   wire logic freq_ok  = clk_running & ~over_freq;
   wire logic allow_en = calib_done & freq_ok;
@@ -158,7 +161,8 @@ module hades_csr
   always_comb begin : b_rd_mux
     s_axil_rdata = 32'd0;
     case (ar_a)
-      CSR_CTRL:            s_axil_rdata = {30'd0, 1'b0, enable_req};
+      CSR_CTRL:            s_axil_rdata = {29'd0, SELFTEST_EN & selftest_req,
+                                           1'b0, enable_req};
       CSR_STATUS:          s_axil_rdata = {28'd0, zq_active, refresh_active,
                                            enable, calib_done};
       CSR_CFG_LATENCY:     s_axil_rdata = {24'd0, 6'd0, cfg_latency};
@@ -233,6 +237,7 @@ module hades_csr
       bkp_addr_q      <= 40'd0;
       bkp_wdata_q     <= 32'd0;
       bkp_done_stky   <= 1'b0;
+      selftest_req    <= 1'b0;
       soft_cnt        <= 14'd0;
       fb = dflt_base_flat();
       for (i = 0; i < N_MAX; i = i + 1) begin
@@ -279,6 +284,7 @@ module hades_csr
         case (aw_a)
           CSR_CTRL: begin
             if (w_s[0]) begin
+              selftest_req <= w_d[2];      // dormant when !SELFTEST_EN
               if (w_d[0]) begin                 // ENABLE request
                 if (allow_en) begin
                   if (!enable_req) latency_active <= cfg_latency;
@@ -293,6 +299,7 @@ module hades_csr
               if (w_d[1]) begin                 // SOFT_RESET
                 soft_reset_stb <= 1'b1;
                 enable_req     <= 1'b0;
+                selftest_req   <= 1'b0;
                 err_status     <= 6'd0;
                 err_port       <= 8'd0;
                 err_addr_q     <= 32'd0;
@@ -382,6 +389,11 @@ module hades_csr
   end
 
   assign port_sel_o = port_sel;
+
+  // the bit latches unconditionally (harmless when the engines are not built),
+  // but the run level only leaves the CSR block when SELFTEST_EN=1 — an
+  // unbuilt SELFTEST bit reads 0 and has no effect (spec: unimplemented bits)
+  assign selftest_run = SELFTEST_EN & selftest_req;
 
   assign bkp_port_o  = bkp_port_q;
   assign bkp_addr_o  = bkp_addr_q;

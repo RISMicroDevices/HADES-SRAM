@@ -28,6 +28,7 @@ module hades_sram_top
   parameter bit  IS_SYNC              = 1'b1,    // CLK_MODE: 1=SYNC, 0=ASYNC
   parameter bit  CSR_EN               = 1'b1,
   parameter bit  SELFTEST_EN          = 1'b0,
+  parameter int  SELFTEST_BLK         = 256,   // selftest words per pass
   parameter int  TARGET_PERIOD_CYCLES = TARGET_PERIOD_500K,
   // static-variant (CSR_EN=0) configuration — all user-overridable
   parameter logic [1:0]  P_L              = 2'd2,
@@ -193,6 +194,19 @@ module hades_sram_top
   logic        clr_tog_p, clr_tog_pd;    // port_clk domain
   wire  logic  clr_edge_p = clr_tog_p ^ clr_tog_pd;
 
+  // post-soft-reset event blanking (declarations hoisted: st_evt_u feeds the
+  // mig_if instance above the always_ff that drives evt_blk)
+  logic [13:0] evt_blk;
+  wire  logic  evt_en = (evt_blk == 14'd0);
+
+  // on-chip selftest (M5-hw): per-port error toggles cross to ui_clk as
+  // 1-cycle pulses into the mig_if PORT_STAT_ERR counters; evt_en blanks
+  // stale pre-soft-reset toggles exactly like the window/overflow events
+  logic        selftest_run;             // broadcast run level (ui_clk)
+  logic [N-1:0] st_tog_p;                // port_clk error toggles (from ports)
+  logic [N-1:0] st_lvl_u, st_dl_u;       // ui_clk sync + edge detect
+  wire  logic [N-1:0] st_evt_u = (st_lvl_u ^ st_dl_u) & {N{evt_en}};
+
   // backdoor command interface (from CSR registers or static pins) + engine
   logic                  bkp_cmd_rd, bkp_cmd_wr;
   logic [7:0]            bkp_cmd_port;
@@ -216,8 +230,9 @@ module hades_sram_top
                                .d(soft_port), .q(soft_port_u));
 
       hades_csr #(
-        .IS_SYNC (IS_SYNC),
-        .DW      (DW)
+        .IS_SYNC     (IS_SYNC),
+        .DW          (DW),
+        .SELFTEST_EN (SELFTEST_EN)
       ) u_csr (
         .ui_clk          (ui_clk),
         .ui_rst          (ui_rst),
@@ -260,6 +275,7 @@ module hades_sram_top
         .soft_reset_stb  (soft_reset_stb),
         .port_err_clr    (port_err_clr),
         .port_sel_o      (port_sel),
+        .selftest_run    (selftest_run),
         .bkp_go_rd       (c_bkp_go_rd),
         .bkp_go_wr       (c_bkp_go_wr),
         .bkp_port_o      (c_bkp_port),
@@ -293,6 +309,10 @@ module hades_sram_top
                                      P_REFRESH_DIV, P_ZQ_DIV,
                                      P_PORT_BASE, P_PORT_SIZE);
       assign enable_eff = calib_done & clk_running & ~over_freq;
+
+      // no CSR in the static variant: when the engines are built in they
+      // auto-run whenever the port is live
+      assign selftest_run = SELFTEST_EN;
 
       assign soft_reset_stb = 1'b0;
       assign port_err_clr   = 1'b0;
@@ -463,6 +483,7 @@ module hades_sram_top
     .port_stat_rd  (port_stat_rd),
     .port_stat_wr  (port_stat_wr),
     .port_stat_err (port_stat_err),
+    .st_err        (st_evt_u),
     .err_clr_port  (port_sel),
     .err_clr       (port_err_clr),
     .soft_rst      (soft_reset_stb),
@@ -526,9 +547,12 @@ module hades_sram_top
 
   for (genvar i = 0; i < N; i++) begin : g_ports
     hades_port #(
-      .AW      (AW),
-      .DW      (DW),
-      .IS_SYNC (IS_SYNC)
+      .AW           (AW),
+      .DW           (DW),
+      .IS_SYNC      (IS_SYNC),
+      .SELFTEST_EN  (SELFTEST_EN),
+      .PORT_ID      (i),
+      .SELFTEST_BLK (SELFTEST_BLK)
     ) u_port (
       .port_clk   (port_clk),
       .port_rst   (port_rst_eff),
@@ -541,6 +565,8 @@ module hades_sram_top
       .cfg_en     (cfg_eff.port_en[i]),
       .cfg_lat    (cfg_eff.latency),
       .enabled    (enable_eff),
+      .st_run     (selftest_run),
+      .err_st_tog (st_tog_p[i]),
       .ui_clk     (ui_clk),
       .ui_rst     (ui_rst_soft),
       .rd_vld     (pr_rd_vld[i]),
@@ -625,6 +651,17 @@ module hades_sram_top
     end
   end
 
+  // selftest error toggles: same toggle/sync2/edge-detect scheme; the pulses
+  // feed the mig_if PORT_STAT_ERR counters (blanked by evt_en via st_evt_u)
+  for (genvar i = 0; i < N; i++) begin : g_st_evt
+    hades_sync2 u_st_evt (.clk(ui_clk), .rst(ui_rst_soft),
+                          .d(st_tog_p[i]), .q(st_lvl_u[i]));
+    always_ff @(posedge ui_clk) begin
+      if (ui_rst_soft) st_dl_u[i] <= 1'b0;
+      else             st_dl_u[i] <= st_lvl_u[i];
+    end
+  end
+
   // quasi-static views of the port_clk stickies for the ui_clk domain
   logic [N-1:0] win_stky_q, ovf_stky_q;
   for (genvar i = 0; i < N; i++) begin : g_stky_qs
@@ -657,13 +694,12 @@ module hades_sram_top
   // the reset just cleared.  10000 ui cycles > 8192-cycle stretch + 3 slowest
   // target periods.  No legitimate violation is lost: SOFT_RESET clears
   // ENABLE, and violations require an accepted request.
-  logic [13:0] evt_blk;
+  // (evt_blk / evt_en declarations are hoisted above the backend instances.)
   always_ff @(posedge ui_clk) begin
     if (ui_rst)                    evt_blk <= 14'd0;
     else if (soft_reset_stb)       evt_blk <= 14'd10000;
     else if (evt_blk != 14'd0)     evt_blk <= evt_blk - 14'd1;
   end
-  wire logic evt_en = (evt_blk == 14'd0);
 
   always_comb begin
     err_in[0] = mig_err_illegal;
@@ -708,8 +744,7 @@ module hades_sram_top
   // ------------------------------------------------------------------
   logic unused;
   assign unused = &{1'b0,
-                    meas_period[31] /* MEAS read by CSR only when CSR_EN */,
-                    SELFTEST_EN};                         // M5
+                    meas_period[31] /* MEAS read by CSR only when CSR_EN */};
 
 endmodule
 

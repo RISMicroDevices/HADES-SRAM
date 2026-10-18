@@ -85,6 +85,7 @@ module hades_mig_if
   output          logic [N_MAX-1:0][31:0] port_stat_rd,
   output          logic [N_MAX-1:0][31:0] port_stat_wr,
   output          logic [N_MAX-1:0][31:0] port_stat_err,
+  input  wire logic [N-1:0]              st_err,  // selftest error pulses (M5-hw)
   input  wire logic [7:0]                err_clr_port,  // PORT_STAT_ERR W1C
   input  wire logic                      err_clr,
   input  wire logic                      soft_rst,
@@ -511,6 +512,13 @@ module hades_mig_if
           port_stat_err[wtrk_port[wtrk_rptr][5:0]] <=
               port_stat_err[wtrk_port[wtrk_rptr][5:0]] + 32'd1;
       end
+      // on-chip selftest checker events (M5-hw, SELFTEST_EN builds): a PRBS
+      // data mismatch or an rvalid phase violation observed in the port_clk
+      // domain.  A same-cycle backend error on the same port collapses into
+      // one count (later non-blocking assignment wins) — PORT_STAT_ERR only
+      // needs 0-vs-nonzero fidelity.
+      for (int p = 0; p < N; p++)
+        if (st_err[p]) port_stat_err[p] <= port_stat_err[p] + 32'd1;
       // per-port error counter clear from CSR indexed window
       if (err_clr && err_clr_port < 8'(N_MAX))
         port_stat_err[err_clr_port[5:0]] <= 32'd0;

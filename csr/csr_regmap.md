@@ -15,7 +15,7 @@ General rules (spec §3.3):
 
 | Offset | Name | Acc | Reset | Description |
 |---|---|---|---|---|
-| 0x00 | `CTRL` | RW | 0 | bit0 `ENABLE`; bit1 `SOFT_RESET` (self-clearing strobe) |
+| 0x00 | `CTRL` | RW | 0 | bit0 `ENABLE`; bit1 `SOFT_RESET` (self-clearing strobe); bit2 `SELFTEST` — run the on-chip self-test engines (only in `SELFTEST_EN=1` builds; otherwise reads 0, writes latch a dormant bit with no effect). Cleared by `SOFT_RESET` |
 | 0x04 | `STATUS` | RO | — | bit0 `CALIB_DONE`; bit1 `READY` (effective enable); bit2 `REFRESH_ACTIVE`; bit3 `ZQ_ACTIVE` |
 | 0x08 | `CFG_LATENCY` | RW | 2 | Read latency L in `port_clk` cycles, bits[1:0] ∈ {1,2}; illegal values ignored; bits[8:15] reserved for per-group extension |
 | 0x0C | `CFG_PORTS` | RW | 0 | Active port count (≤ N_MAX), bits[7:0] |
@@ -48,7 +48,11 @@ Port-level registers never flatten into the address space. Write `PORT_SEL` firs
 | 0x2C | `PORT_SIZE` | RW | 2^22 | Selected port size in **DW-bit words** (2^22 words = 16 MiB at DW=32) |
 | 0x30 | `PORT_STAT_RD` | RO | 0 | Selected port read count |
 | 0x34 | `PORT_STAT_WR` | RO | 0 | Selected port write count |
-| 0x38 | `PORT_STAT_ERR` | RO/W1C | 0 | Selected port error count (illegal addr / timeout / SLVERR); any write clears it |
+| 0x38 | `PORT_STAT_ERR` | RO/W1C | 0 | Selected port error count (illegal addr / timeout / SLVERR; plus on-chip self-test PRBS/phase errors in `SELFTEST_EN=1` builds — simultaneous backend+self-test events on one port collapse to one count); any write clears it |
+
+## On-chip self-test (`SELFTEST_EN` builds, spec §6.2)
+
+With `SELFTEST_EN=1` at elaboration, every port carries a `hades_selftest` engine in the `port_clk` domain. Setting `CTRL.SELFTEST` starts all enabled ports: each engine takes over its port's request pins and loops `write BLK words -> read them back -> drain` with a per-port PRBS pattern (`xorshift32` mix of address, pass counter and port index; `BLK` = `SELFTEST_BLK` parameter, default 256 words). Checks run at every `port_clk` edge: `rvalid` must match the shaper's release schedule exactly (phase), and read data must match the pattern issued L edges earlier (data). Each violation increments that port's `PORT_STAT_ERR`; `ERR_STATUS` is not affected (selftest errors are reported only per-port). Acceptance: run, then poll `PORT_STAT_ERR` per port — 0 = pass (A4/A5/A9/A10 use this as the on-board correctness criterion; ILA only spot-checks). Clearing `CTRL.SELFTEST` lets in-flight reads drain before the engines release the pins; `SOFT_RESET` clears the bit. **Host protocol: clear `SELFTEST` and wait ≥ 16 `port_clk` periods before clearing `ENABLE` or `SOFT_RESET`** — accepted-but-ungranted requests do not survive an enable drop (the window sentinel will fire, same rule as for pin traffic). In the static variant (`CSR_EN=0`) the engines auto-run whenever the IP is enabled; their errors accumulate in `PORT_STAT_ERR` but have no pin readout.
 
 ## Backdoor channel
 

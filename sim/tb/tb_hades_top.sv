@@ -10,6 +10,9 @@
 //   ASYNC                  CSR_EN=1, ASYNC   TEST=all_csr (t7/t13d walk phase)
 //   CSR_STATIC             CSR_EN=0, SYNC    TEST=all_static (static,t3,t9)
 //   CSR_STATIC+PARAM_OVRD  CSR_EN=0, SYNC, user P_PORT_BASE/SIZE overrides
+//   SELFTEST               CSR_EN=1, SYNC + SELFTEST_EN=1, BLK=16
+//                          (TEST=selftest on-chip self-test smoke; the engine
+//                          is inert in every other TEST — pins pass through)
 // Dedicated runs (not in all_*): TEST=t3 +MAINT_STRESS=1 (worst-case
 // maintenance alignment), TEST=t14 +RD_LAT_ADD=1500 (bit5 sentinel fault),
 // TEST=t8 +DROP_RD_BEAT/+DROP_RD_BEAT2/+SLVERR_RD_BEAT/+SLVERR_WR_BEAT
@@ -39,6 +42,11 @@ module tb_hades_top;
   localparam bit TB_SYNC = 1'b0;
 `else
   localparam bit TB_SYNC = 1'b1;
+`endif
+`ifdef SELFTEST
+  localparam bit TB_SELFTEST = 1'b1;
+`else
+  localparam bit TB_SELFTEST = 1'b0;
 `endif
 
   localparam logic [BASE_W-1:0] OVRD_BASE3 = 34'h1_2345_0000;
@@ -215,6 +223,8 @@ module tb_hades_top;
     .AW       (AW_DEFAULT),
     .IS_SYNC  (TB_SYNC),
     .CSR_EN   (TB_CSR_EN),
+    .SELFTEST_EN  (TB_SELFTEST),
+    .SELFTEST_BLK (16),          // short passes: fast smoke coverage
     .P_PORT_BASE (tb_base_flat()),
     .P_PORT_SIZE (tb_size_flat())
   ) dut (
@@ -1445,6 +1455,101 @@ module tb_hades_top;
   endtask
 
   // ------------------------------------------------------------------
+  // M5-hw on-chip self-test smoke (SELFTEST_EN builds only; spec 6.2):
+  //   1. clean run: the engines drive all enabled ports; PORT_STAT_ERR must
+  //      stay 0, ERR_STATUS must stay 0, traffic counters must advance
+  //   2. data-fault injection (force shaper rdata)  -> PORT_STAT_ERR grows
+  //   3. phase-fault injection (force shaper rvalid) -> PORT_STAT_ERR grows
+  //   4. W1C clear + healthy re-run at L=2 and L=1
+  // The C++ expected-queue checker is suspended while the engines drive (they
+  // are self-checking); the SV X-propagation monitor stays armed.
+  // ------------------------------------------------------------------
+  task automatic test_selftest();
+    logic [31:0] rd;
+    logic [31:0] err_cnt;
+    begin
+      hades_log("--- M5-hw: on-chip self-test smoke ---");
+      calib_done = 1'b1;
+      csr_default_map();
+      csr_enable(2, 64'hF, 4);
+      hades_suspend_checks(1);
+
+      // start the engines (CTRL = ENABLE|SELFTEST)
+      axil_wr(CSR_CTRL, 32'h5);
+      // >= 10 passes at BLK=16 (one pass = 2*16 issues + drain)
+      repeat (500) @(posedge port_clk);
+
+      // clean run: no errors anywhere, and traffic really happened
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("SELFTEST: ERR_STATUS clean", rd & 32'h3F, 32'h0);
+      for (int i = 0; i < 4; i++) begin
+        axil_wr(CSR_PORT_SEL, 32'(i));
+        axil_rd(CSR_PORT_STAT_ERR, err_cnt);
+        hades_check_eq($sformatf("SELFTEST: PORT_STAT_ERR[%0d] clean", i),
+                       err_cnt, 32'h0);
+        axil_rd(CSR_PORT_STAT_RD, rd);
+        hades_check_range($sformatf("SELFTEST: PORT_STAT_RD[%0d] advanced", i),
+                          rd, 32'd50, 32'h7FFF_FFFF);
+        axil_rd(CSR_PORT_STAT_WR, rd);
+        hades_check_range($sformatf("SELFTEST: PORT_STAT_WR[%0d] advanced", i),
+                          rd, 32'd50, 32'h7FFF_FFFF);
+      end
+
+      // data-fault injection on port 0: corrupt the shaper's rdata for a few
+      // periods -> the per-cycle checker must count mismatches
+      force dut.g_ports[0].u_port.u_shaper.rdata = 32'hDEAD_BEEF;
+      repeat (8) @(posedge port_clk);
+      release dut.g_ports[0].u_port.u_shaper.rdata;
+      repeat (20) @(posedge port_clk);   // let the toggles cross + count
+      axil_wr(CSR_PORT_SEL, 32'd0);
+      axil_rd(CSR_PORT_STAT_ERR, err_cnt);
+      hades_check_range("SELFTEST: PORT_STAT_ERR[0] after data fault",
+                        err_cnt, 32'd1, 32'h7FFF_FFFF);
+
+      // phase-fault injection on port 0: swallow rvalid for a few periods
+      force dut.g_ports[0].u_port.u_shaper.rvalid = 1'b0;
+      repeat (4) @(posedge port_clk);
+      release dut.g_ports[0].u_port.u_shaper.rvalid;
+      repeat (20) @(posedge port_clk);
+      axil_rd(CSR_PORT_STAT_ERR, rd);
+      hades_check_range("SELFTEST: PORT_STAT_ERR[0] after phase fault",
+                        rd, err_cnt + 32'd1, 32'h7FFF_FFFF);
+
+      // W1C clear, then a clean re-run must stay at 0
+      axil_wr(CSR_PORT_STAT_ERR, 32'h1);   // any write clears the selected port
+      axil_rd(CSR_PORT_STAT_ERR, rd);
+      hades_check_eq("SELFTEST: PORT_STAT_ERR[0] cleared", rd, 32'h0);
+      repeat (200) @(posedge port_clk);
+      axil_rd(CSR_PORT_STAT_ERR, rd);
+      hades_check_eq("SELFTEST: PORT_STAT_ERR[0] stays 0 on re-run", rd, 32'h0);
+
+      // L=1 leg: stop the engines and let in-flight reads drain BEFORE
+      // dropping ENABLE (accepted-but-ungranted requests would otherwise be
+      // stuck behind the enable mask and trip the window sentinel — the
+      // host must quiesce selftest before reprogramming, same as pin traffic)
+      axil_wr(CSR_CTRL, 32'h1);
+      repeat (16) @(posedge port_clk);
+      csr_enable(1, 64'hF, 4);
+      axil_wr(CSR_CTRL, 32'h5);
+      repeat (300) @(posedge port_clk);
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("SELFTEST: ERR_STATUS clean at L=1", rd & 32'h3F, 32'h0);
+      for (int i = 0; i < 4; i++) begin
+        axil_wr(CSR_PORT_SEL, 32'(i));
+        axil_rd(CSR_PORT_STAT_ERR, err_cnt);
+        hades_check_eq($sformatf("SELFTEST: PORT_STAT_ERR[%0d] clean at L=1", i),
+                       err_cnt, 32'h0);
+      end
+
+      // engines off; they drain (in-flight releases) before checks resume
+      axil_wr(CSR_CTRL, 32'h1);
+      repeat (16) @(posedge port_clk);
+      hades_suspend_checks(0);
+      axil_wr(CSR_CTRL, 32'h0);
+    end
+  endtask
+
+  // ------------------------------------------------------------------
   // T12: configuration reload — run, DISABLE, change N/L/CFG_MIN_PERIOD,
   // re-ENABLE; behavior follows the new configuration with no state leak.
   // Also covers SOFT_RESET stat clearing and the CSR read sweep.
@@ -1878,6 +1983,7 @@ module tb_hades_top;
     else if (test == "t9") begin calib_done = 1'b1; test_t9();      end
 `ifndef CSR_STATIC
     else if (test == "t12") begin calib_done = 1'b1; test_t12();    end
+    else if (test == "selftest")             test_selftest();
     else if (test == "t13b") begin calib_done = 1'b1; test_t13b();  end
     else if (test == "rst")  begin calib_done = 1'b1; test_rst();   end
     else if (test == "ovf")  begin calib_done = 1'b1; test_ovf();   end
