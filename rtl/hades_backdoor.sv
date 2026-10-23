@@ -52,17 +52,26 @@ module hades_backdoor
 
   localparam int SH = dw_shift(DW);   // addr bits selecting a lane in a beat
 
-  typedef enum logic [1:0] {B_IDLE, B_RD, B_RD_WAIT, B_WR} state_e;
+  typedef enum logic [2:0] {B_IDLE, B_RD, B_RD_WAIT, B_WR, B_ACCEPT} state_e;
   state_e state;
 
-  // legality (evaluated in the command cycle)
-  wire logic port_ok = (cmd_port < 8'(N_MAX));
-  wire logic addr_ok = port_ok &&
-      (cmd_addr < {8'b0, cfg.port_size[cmd_port[5:0]]});
+  // command-cycle snapshot: the command fields and the two config words this
+  // command needs are latched on the strobe, so the legality compare and the
+  // beat/lane translate run one cycle later on registered values (the 64:1
+  // cfg mux -> compare -> request-gating cone does not close at 300 MHz).
+  logic                  cmd_wr_q;
+  logic                  port_ok_q;
+  logic [39:0]           cmd_addr_q;
+  logic [DW-1:0]         cmd_wdata_q;
+  logic [31:0]           size_sel_q;
+  logic [BASE_W-1:0]     base_sel_q;
 
-  wire logic [BASE_W-1:0] cmd_beat =
-      cfg.port_base[cmd_port[5:0]] + BASE_W'(cmd_addr >> SH);
-  wire logic [5:0]        cmd_lane = 6'(cmd_addr & 40'((1 << SH) - 1));
+  wire logic port_ok = (cmd_port < 8'(N_MAX));
+
+  // legality + translate (evaluated in B_ACCEPT on the snapshot)
+  wire logic addr_ok = port_ok_q && (cmd_addr_q < {8'b0, size_sel_q});
+  wire logic [BASE_W-1:0] cmd_beat = base_sel_q + BASE_W'(cmd_addr_q >> SH);
+  wire logic [5:0]        cmd_lane = 6'(cmd_addr_q & 40'((1 << SH) - 1));
 
   assign busy = (state != B_IDLE);
 
@@ -72,6 +81,12 @@ module hades_backdoor
       done        <= 1'b0;
       err         <= 1'b0;
       rdata       <= '0;
+      cmd_wr_q    <= 1'b0;
+      port_ok_q   <= 1'b0;
+      cmd_addr_q  <= '0;
+      cmd_wdata_q <= '0;
+      size_sel_q  <= '0;
+      base_sel_q  <= '0;
       bkp_rd_req  <= 1'b0;
       bkp_rd_beat <= '0;
       bkp_rd_lane <= 6'd0;
@@ -84,22 +99,32 @@ module hades_backdoor
       unique case (state)
         B_IDLE: begin
           if (cmd_rd || cmd_wr) begin
-            err <= 1'b0;
-            if (!addr_ok) begin
-              done <= 1'b1;            // illegal: complete at once, no AXI
-              err  <= 1'b1;
-            end else if (cmd_wr) begin
-              bkp_wr_req  <= 1'b1;
-              bkp_wr_beat <= cmd_beat;
-              bkp_wr_lane <= cmd_lane;
-              bkp_wr_data <= cmd_wdata;
-              state       <= B_WR;
-            end else begin
-              bkp_rd_req  <= 1'b1;
-              bkp_rd_beat <= cmd_beat;
-              bkp_rd_lane <= cmd_lane;
-              state       <= B_RD;
-            end
+            err        <= 1'b0;
+            cmd_wr_q   <= cmd_wr;
+            port_ok_q  <= port_ok;
+            cmd_addr_q <= cmd_addr;
+            cmd_wdata_q<= cmd_wdata;
+            size_sel_q <= cfg.port_size[cmd_port[5:0]];
+            base_sel_q <= cfg.port_base[cmd_port[5:0]];
+            state      <= B_ACCEPT;
+          end
+        end
+        B_ACCEPT: begin
+          if (!addr_ok) begin
+            done  <= 1'b1;             // illegal: complete at once, no AXI
+            err   <= 1'b1;
+            state <= B_IDLE;
+          end else if (cmd_wr_q) begin
+            bkp_wr_req  <= 1'b1;
+            bkp_wr_beat <= cmd_beat;
+            bkp_wr_lane <= cmd_lane;
+            bkp_wr_data <= cmd_wdata_q;
+            state       <= B_WR;
+          end else begin
+            bkp_rd_req  <= 1'b1;
+            bkp_rd_beat <= cmd_beat;
+            bkp_rd_lane <= cmd_lane;
+            state       <= B_RD;
           end
         end
         B_WR: begin

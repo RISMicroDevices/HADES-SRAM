@@ -38,7 +38,14 @@ module hades_arbiter
   input  wire logic [N-1:0] rd_gnt,        // engine commit pulses
   input  wire logic [N-1:0] wr_gnt,
   output      logic [N-1:0] rd_vld_o,
-  output      logic [N-1:0] wr_vld_o
+  output      logic [N-1:0] wr_vld_o,
+  // every slot of the current period has been released (2026-10-21 A4: the
+  // refresh scheduler gates on backend idle AND this — the engine idles
+  // momentarily BETWEEN slot releases mid-drain, which is too early)
+  output      logic         slots_done,
+  // ... and only while a refresh fired NOW still drains into the
+  // inter-period idle gap (see below)
+  output      logic         maint_fire_ok
 );
 
   // ui cycles since the period tick (saturates)
@@ -50,6 +57,27 @@ module hades_arbiter
   end
 
   localparam clk_mode_e MODE = IS_SYNC ? CLK_MODE_SYNC : CLK_MODE_ASYNC;
+
+  // all of this period's port slots are behind us (a few cycles past the
+  // last slot — the active_ports*SLOT_PER_PORT product overshoots the last
+  // slot by exactly one slot, which the idle-gap margin absorbs)
+  wire logic [15:0] last_slot = 16'(MAINT_SLOTS + FIRST_LAT + cdc_ovhd(MODE))
+                                + 16'(cfg.active_ports) * 16'(SLOT_PER_PORT);
+  assign slots_done = (per_cnt >= last_slot);
+
+  // Maintenance fire deadline (2026-10-21 A4): a refresh fired late in the
+  // period blocks AR past the next period's first slots and shoves the tail
+  // ports past L=1 (observed failing at tick+574+, passing at ~450).
+  // Firing at F must satisfy F + MAINT_BLOCK_EST <= min_period + first slot,
+  // so the block always drains into the inter-period gap.  Dues that miss
+  // the window defer to the next period's drain end (the window recurs
+  // every period; the free-running debt timer keeps the long-run rate exact
+  // and the urgency override bounds the deferral).  Catch-up pairs and
+  // refresh+ZQCS chains split across periods automatically: the second op
+  // lands past the deadline and waits.
+  wire logic [15:0] fire_latest = 16'(cfg.min_period) + 16'(MAINT_SLOTS + FIRST_LAT)
+                                  - 16'(MAINT_BLOCK_EST);
+  assign maint_fire_ok = slots_done && (per_cnt <= fire_latest);
 
   logic [N-1:0] rd_open, wr_open;
 

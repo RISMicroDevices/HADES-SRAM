@@ -22,92 +22,98 @@
 module hades_sram_top
   import hades_pkg::*;
 #(
-  parameter int  N                    = N_MAX,   // active ports (<= N_MAX)
-  parameter int  DW                   = DW_DEFAULT,
-  parameter int  AW                   = AW_DEFAULT,
+  // NOTE: defaults are plain literals (not hades_pkg constants) because the
+  // Vivado IP packager cannot resolve package references in parameter
+  // defaults; values must match hades_pkg (N_MAX=64, DW=32, AW=22, 500 KHz
+  // target = 600 ui_clk cycles)
+  parameter int  N                    = 64,      // active ports (<= N_MAX)
+  parameter int  DW                   = 32,
+  parameter int  AW                   = 22,
   parameter bit  IS_SYNC              = 1'b1,    // CLK_MODE: 1=SYNC, 0=ASYNC
   parameter bit  CSR_EN               = 1'b1,
   parameter bit  SELFTEST_EN          = 1'b0,
   parameter int  SELFTEST_BLK         = 256,   // selftest words per pass
-  parameter int  TARGET_PERIOD_CYCLES = TARGET_PERIOD_500K,
+  parameter int  TARGET_PERIOD_CYCLES = 600,
   // static-variant (CSR_EN=0) configuration — all user-overridable
   parameter logic [1:0]  P_L              = 2'd2,
-  parameter logic [N_MAX-1:0] P_PORT_EN   = {N_MAX{1'b1}},
-  parameter logic [31:0] P_MIN_PERIOD     = 32'(TARGET_PERIOD_500K),
+  parameter logic [N_MAX-1:0] P_PORT_EN   = {64{1'b1}},
+  parameter logic [31:0] P_MIN_PERIOD     = 32'd600,
   parameter logic [31:0] P_REFRESH_DIV    = 32'd2100,
   parameter logic [31:0] P_ZQ_DIV         = 32'd32000,
-  parameter logic [N_MAX*BASE_W-1:0] P_PORT_BASE = dflt_base_flat(),
-  parameter logic [N_MAX*32-1:0]     P_PORT_SIZE = dflt_size_flat(DW)
+  parameter logic [N_MAX*BASE_W-1:0] P_PORT_BASE =
+      2176'h3F0000000F80000003D0000000F00000003B0000000E8000000390000000E0000000370000000D8000000350000000D0000000330000000C8000000310000000C00000002F0000000B80000002D0000000B00000002B0000000A8000000290000000A0000000270000000980000002500000009000000023000000088000000210000000800000001F0000000780000001D0000000700000001B00000006800000019000000060000000170000000580000001500000005000000013000000048000000110000000400000000F0000000380000000D0000000300000000B00000002800000009000000020000000070000000180000000500000001000000003000000008000000010000000000000,
+  parameter logic [N_MAX*32-1:0]     P_PORT_SIZE =
+      2048'h400000004000000040000000400000004000000040000000400000004000000040000000400000004000000040000000400000004000000040000000400000004000000040000000400000004000000040000000400000004000000040000000400000004000000040000000400000004000000040000000400000004000000040000000400000004000000040000000400000004000000040000000400000004000000040000000400000004000000040000000400000004000000040000000400000004000000040000000400000004000000040000000400000004000000040000000400000004000000040000000400000004000000040000000400000
 ) (
-  input  wire logic ui_clk,
-  input  wire logic ui_rst_n,
-  input  wire logic port_clk,
-  input  wire logic port_rst_n,
-  input  wire logic calib_done,      // MIG init_calib_complete
+  input  wire ui_clk,
+  input  wire ui_rst_n,
+  input  wire port_clk,
+  input  wire port_rst_n,
+  input  wire calib_done,      // MIG init_calib_complete
 
   // ---- emulated SRAM ports (port_clk domain) ----
-  input  wire logic [N-1:0]           sram_en,
-  input  wire logic [N-1:0]           sram_we,
-  input  wire logic [N-1:0][AW-1:0]   sram_addr,
-  input  wire logic [N-1:0][DW-1:0]   sram_wdata,
+  input  wire [N-1:0]           sram_en,
+  input  wire [N-1:0]           sram_we,
+  input  wire [N-1:0][AW-1:0]   sram_addr,
+  input  wire [N-1:0][DW-1:0]   sram_wdata,
   output          logic [N-1:0][DW-1:0] sram_rdata,
   output          logic [N-1:0]       sram_rvalid,
 
   // ---- AXI4 master to MIG (512-bit data, 4-bit ID, 40-bit byte address) ----
   output          logic [3:0]         m_axi_awid,
-  output          logic [AXI_ADDR_W-1:0] m_axi_awaddr,
+  output          logic [39:0] m_axi_awaddr,
   output          logic [7:0]         m_axi_awlen,
   output          logic [2:0]         m_axi_awsize,
   output          logic [1:0]         m_axi_awburst,
   output          logic               m_axi_awvalid,
-  input  wire logic                   m_axi_awready,
+  input  wire                   m_axi_awready,
   output          logic [511:0]       m_axi_wdata,
   output          logic [63:0]        m_axi_wstrb,
   output          logic               m_axi_wlast,
   output          logic               m_axi_wvalid,
-  input  wire logic                   m_axi_wready,
-  input  wire logic [3:0]             m_axi_bid,
-  input  wire logic [1:0]             m_axi_bresp,
-  input  wire logic                   m_axi_bvalid,
+  input  wire                   m_axi_wready,
+  input  wire [3:0]             m_axi_bid,
+  input  wire [1:0]             m_axi_bresp,
+  input  wire                   m_axi_bvalid,
   output          logic               m_axi_bready,
   output          logic [3:0]         m_axi_arid,
-  output          logic [AXI_ADDR_W-1:0] m_axi_araddr,
+  output          logic [39:0] m_axi_araddr,
   output          logic [7:0]         m_axi_arlen,
   output          logic [2:0]         m_axi_arsize,
   output          logic [1:0]         m_axi_arburst,
   output          logic               m_axi_arvalid,
-  input  wire logic                   m_axi_arready,
-  input  wire logic [3:0]             m_axi_rid,
-  input  wire logic [511:0]           m_axi_rdata,
-  input  wire logic [1:0]             m_axi_rresp,
-  input  wire logic                   m_axi_rlast,
-  input  wire logic                   m_axi_rvalid,
+  input  wire                   m_axi_arready,
+  input  wire [3:0]             m_axi_rid,
+  input  wire [511:0]           m_axi_rdata,
+  input  wire [1:0]             m_axi_rresp,
+  input  wire                   m_axi_rlast,
+  input  wire                   m_axi_rvalid,
   output          logic               m_axi_rready,
 
   // ---- MIG user refresh / ZQCS (spec 3.2) — driven by hades_refresh_sched ----
   output          logic               app_ref_req,
-  input  wire logic                   app_ref_ack,
+  input  wire                   app_ref_ack,
   output          logic               app_zq_req,
-  input  wire logic                   app_zq_ack,
+  input  wire                   app_zq_ack,
 
   // ---- CSR AXI4-Lite slave (CSR_EN=1) ----
-  input  wire logic [15:0]            s_axil_awaddr,
-  input  wire logic                   s_axil_awvalid,
+  input  wire [15:0]            s_axil_awaddr,
+  input  wire                   s_axil_awvalid,
   output          logic               s_axil_awready,
-  input  wire logic [31:0]            s_axil_wdata,
-  input  wire logic [3:0]             s_axil_wstrb,
-  input  wire logic                   s_axil_wvalid,
+  input  wire [31:0]            s_axil_wdata,
+  input  wire [3:0]             s_axil_wstrb,
+  input  wire                   s_axil_wvalid,
   output          logic               s_axil_wready,
   output          logic [1:0]         s_axil_bresp,
   output          logic               s_axil_bvalid,
-  input  wire logic                   s_axil_bready,
-  input  wire logic [15:0]            s_axil_araddr,
-  input  wire logic                   s_axil_arvalid,
+  input  wire                   s_axil_bready,
+  input  wire [15:0]            s_axil_araddr,
+  input  wire                   s_axil_arvalid,
   output          logic               s_axil_arready,
   output          logic [31:0]        s_axil_rdata,
   output          logic [1:0]         s_axil_rresp,
   output          logic               s_axil_rvalid,
-  input  wire logic                   s_axil_rready,
+  input  wire                   s_axil_rready,
 
   // ---- static-variant pins (CSR_EN=0) ----
   output          logic               stat_calib_done,
@@ -117,11 +123,11 @@ module hades_sram_top
   output          logic [7:0]         stat_err,      // mirrors ERR_STATUS[5:0]
 
   // ---- pin-level backdoor (CSR_EN=0; CSR_EN=1 uses the BKP_* registers) ----
-  input  wire logic                   bkp_req,
-  input  wire logic                   bkp_we,
-  input  wire logic [7:0]             bkp_port,
-  input  wire logic [BASE_W-1:0]      bkp_addr,
-  input  wire logic [DW-1:0]          bkp_wdata,
+  input  wire                   bkp_req,
+  input  wire                   bkp_we,
+  input  wire [7:0]             bkp_port,
+  input  wire [33:0]      bkp_addr,
+  input  wire [DW-1:0]          bkp_wdata,
   output          logic [DW-1:0]      bkp_rdata,
   output          logic               bkp_ack
 );
@@ -144,6 +150,25 @@ module hades_sram_top
   logic ui_rst, port_rst;
   hades_rst_sync u_rst_ui   (.clk(ui_clk),   .arst_n(ui_rst_n),   .srst(ui_rst));
   hades_rst_sync u_rst_port (.clk(port_clk), .arst_n(port_rst_n), .srst(port_rst));
+
+  // ------------------------------------------------------------------
+  // Boundary input registering (300 MHz closure, M5-hw): calib_done and the
+  // MIG maintenance acks cross from the MIG side before use — every input
+  // sees a single FF.  calib_done is sticky and the acks are 1-cycle pulses
+  // whose exact cycle is internal to the MIG, so +1 ui_clk is invisible.
+  // ------------------------------------------------------------------
+  logic calib_q, ref_ack_q, zq_ack_q;
+  always_ff @(posedge ui_clk) begin
+    if (ui_rst) begin
+      calib_q   <= 1'b0;
+      ref_ack_q <= 1'b0;
+      zq_ack_q  <= 1'b0;
+    end else begin
+      calib_q   <= calib_done;
+      ref_ack_q <= app_ref_ack;
+      zq_ack_q  <= app_zq_ack;
+    end
+  end
 
   // ------------------------------------------------------------------
   // Frequency monitor
@@ -184,6 +209,9 @@ module hades_sram_top
   logic        refresh_active, zq_active;
   logic [31:0] stat_refcnt;
   logic        period_tick;              // maintenance-window head
+  logic        backend_idle;             // mig_if quiescent (refresh gate)
+  logic        slots_done;               // all of the period's slots released
+  logic        maint_fire_ok;            // refresh block still fits the gap
   logic        tmo_stky_u, slv_stky_u, ill_stky_u;  // static-mirror stickies
   logic        mig_err_illegal, mig_err_timeout, mig_err_slverr;
   logic [7:0]  mig_err_port;
@@ -253,7 +281,7 @@ module hades_sram_top
         .s_axil_rresp    (s_axil_rresp),
         .s_axil_rvalid   (s_axil_rvalid),
         .s_axil_rready   (s_axil_rready),
-        .calib_done      (calib_done),
+        .calib_done      (calib_q),
         .clk_running     (clk_running),
         .over_freq       (over_freq),
         .meas_period     (meas_period),
@@ -308,7 +336,7 @@ module hades_sram_top
       assign cfg_eff    = static_cfg(P_L, P_PORT_EN, P_MIN_PERIOD,
                                      P_REFRESH_DIV, P_ZQ_DIV,
                                      P_PORT_BASE, P_PORT_SIZE);
-      assign enable_eff = calib_done & clk_running & ~over_freq;
+      assign enable_eff = calib_q & clk_running & ~over_freq;
 
       // no CSR in the static variant: when the engines are built in they
       // auto-run whenever the port is live
@@ -334,7 +362,7 @@ module hades_sram_top
       assign bkp_cmd_addr  = {6'b0, bkp_addr};
       assign bkp_cmd_wdata = bkp_wdata;
 
-      assign stat_calib_done     = calib_done;
+      assign stat_calib_done     = calib_q;
       assign stat_ready          = enable_eff;
       assign stat_refresh_active = refresh_active;
       assign stat_zq_active      = zq_active;
@@ -427,7 +455,9 @@ module hades_sram_top
     .rd_gnt      (p_rd_gnt),
     .wr_gnt      (p_wr_gnt),
     .rd_vld_o    (p_rd_vld),
-    .wr_vld_o    (p_wr_vld)
+    .wr_vld_o    (p_wr_vld),
+    .slots_done  (slots_done),
+    .maint_fire_ok (maint_fire_ok)
   );
 
   hades_mig_if #(
@@ -487,6 +517,7 @@ module hades_sram_top
     .err_clr_port  (port_sel),
     .err_clr       (port_err_clr),
     .soft_rst      (soft_reset_stb),
+    .backend_idle  (backend_idle),
     .err_illegal   (mig_err_illegal),
     .err_timeout   (mig_err_timeout),
     .err_slverr    (mig_err_slverr),
@@ -724,16 +755,17 @@ module hades_sram_top
   hades_refresh_sched u_refresh_sched (
     .ui_clk         (ui_clk),
     .ui_rst         (ui_rst_soft),
-    .calib_done     (calib_done),
+    .calib_done     (calib_q),
     .enable         (enable_eff),
+    .engine_idle    (backend_idle && maint_fire_ok),
     .port_clk       (port_clk),
     .refresh_div    (cfg_eff.refresh_div),
     .zq_div         (cfg_eff.zq_div),
     .period_tick    (period_tick),
     .app_ref_req    (app_ref_req),
-    .app_ref_ack    (app_ref_ack),
+    .app_ref_ack    (ref_ack_q),
     .app_zq_req     (app_zq_req),
-    .app_zq_ack     (app_zq_ack),
+    .app_zq_ack     (zq_ack_q),
     .refresh_active (refresh_active),
     .zq_active      (zq_active),
     .stat_refcnt    (stat_refcnt)

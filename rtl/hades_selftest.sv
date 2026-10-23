@@ -58,10 +58,19 @@ module hades_selftest #(
 
   localparam int CW = (BLK > 1) ? $clog2(BLK) : 1;
 
+  // phase decorrelation (2026-10-20 hardware finding): all engines start
+  // their WR/RD phases in lockstep, so the 64 write bursts collide and the
+  // backend's write path (RMV-paced on this RDIMM) overflows high-index
+  // ports' request FIFOs.  Stagger the first pass by PORT_ID*BLK port
+  // cycles at run start; phases then stay decorrelated by the drift.
+  localparam int SDLY = PORT_ID * BLK;
+  localparam int SCW  = (SDLY > 1) ? $clog2(SDLY) : 1;
+
   typedef enum logic [1:0] {ST_IDLE, ST_WR, ST_RD, ST_DRAIN} st_e;
 
   st_e           state;
   logic [CW-1:0] cnt;
+  logic [SCW-1:0] start_dly;
   logic [7:0]    pass_r;
   logic [2:0]    quiet_cnt;
   logic          run_p;
@@ -113,6 +122,7 @@ module hades_selftest #(
     if (port_rst) begin
       state        <= ST_IDLE;
       cnt          <= '0;
+      start_dly    <= SCW'(SDLY);
       pass_r       <= 8'd0;
       quiet_cnt    <= 3'd4;
       st_pipe      <= 2'b00;
@@ -149,9 +159,12 @@ module hades_selftest #(
       // ---- stimulus FSM ----
       unique case (state)
         ST_IDLE: begin
+          if (run_p && port_live && (start_dly != '0))
+            start_dly <= start_dly - SCW'(1);
           if (rvalid)               quiet_cnt <= 3'd4;
           else if (quiet_cnt != 3'd0) quiet_cnt <= quiet_cnt - 3'd1;
-          if (run_p && port_live && (quiet_cnt == 3'd0) && !rvalid) begin
+          if (run_p && port_live && (quiet_cnt == 3'd0) && !rvalid
+              && (start_dly == '0)) begin
             state  <= ST_WR;
             cnt    <= '0;
             pass_r <= pass_r + 8'd1;

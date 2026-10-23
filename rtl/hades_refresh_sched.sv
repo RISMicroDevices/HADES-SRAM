@@ -6,20 +6,23 @@
 // Timing model:
 //   - period tick: port_clk sampled through a 2FF synchronizer, rising-edge
 //     detected (<= 2 ui_clk jitter in ASYNC, absorbed by the slot margin).
-//     The maintenance window is the first MAINT_SLOTS ui cycles after a tick
-//     (slot-table head, spec 3.2); port service slots begin later.
+//     The arbiter's slot table keeps port service behind a MAINT_SLOTS head
+//     window (spec 3.2).
 //   - refresh: a free-running ui_clk timer pends one debt every
-//     CFG_REFRESH_DIV cycles.  While enabled, debts are serviced ONLY inside
-//     the maintenance window (zero jitter to the emulated domain, A6), at
-//     most 2 per window (covers 100 KHz, where tREFI needs ~1.43 per period);
-//     a debt >= 4 (insane config or clock stutter) overrides the window gate
-//     — a mid-period refresh beats losing DRAM contents.  While disabled the
-//     window gate is open (no port contract exists), so memory stays alive
-//     across DISABLE/ENABLE reconfiguration.  The free-running timer (never
-//     restarted by service) keeps the long-run issue rate exactly 1/div
-//     (A6: STAT_REFCNT vs configured rate, +-1%).
+//     CFG_REFRESH_DIV cycles.  While enabled, debts are serviced when the
+//     backend is ENGINE-IDLE (no pending requests, engines in IDLE) — the
+//     per-period idle gap behind the drain absorbs the ~tRFC AR blocking so
+//     maintenance never delays a port slot (A4, 2026-10-21: window-head
+//     service collided with the 64-port drain on the real MIG, whose
+//     refresh blocks AR far longer than tRFC alone).  A debt >= 4 (insane
+//     config, clock stutter, or a load with no idle gaps) overrides the
+//     idle gate — a mid-drain refresh beats losing DRAM contents.  While
+//     disabled the gate is open (no port contract exists), so memory stays
+//     alive across DISABLE/ENABLE reconfiguration.  The free-running timer
+//     (never restarted by service) keeps the long-run issue rate exactly
+//     1/div (A6: STAT_REFCNT vs configured rate, +-1%).
 //   - ZQCS: a tick counter pends a due every CFG_ZQ_DIV target periods;
-//     serviced after any pending refresh in the same window.
+//     serviced after any pending refresh, under the same idle gate.
 //
 // JEDEC compliance at the extremes: 100 KHz worst-case refresh spacing =
 // refresh_div + one target period = 7 us + 10 us = 17 us << 9 x tREFI
@@ -34,6 +37,8 @@ module hades_refresh_sched
   input  wire logic        ui_rst,       // synchronous (top passes ui_rst_soft)
   input  wire logic        calib_done,   // MIG up: schedule only past calibration
   input  wire logic        enable,       // effective datapath enable
+  input  wire logic        engine_idle,  // mig_if quiescent (no requests, engines
+                                         // in IDLE): service maintenance here
   input  wire logic        port_clk,     // target clock (sampled as data)
   input  wire logic [31:0] refresh_div,  // ui_clk cycles between refresh dues
   input  wire logic [31:0] zq_div,       // target periods between ZQCS dues
@@ -61,19 +66,6 @@ module hades_refresh_sched
   end
 
   assign period_tick = pclk_u & ~pclk_d;
-
-  // ------------------------------------------------------------------
-  // maintenance-window gate: open for MAINT_SLOTS ui cycles after a tick
-  // ------------------------------------------------------------------
-  logic [15:0] win_cnt;
-
-  always_ff @(posedge ui_clk) begin
-    if (ui_rst)            win_cnt <= 16'hFFFF;
-    else if (period_tick)  win_cnt <= 16'd1;
-    else if (win_cnt != 16'hFFFF) win_cnt <= win_cnt + 16'd1;
-  end
-
-  wire logic win_open = (win_cnt < 16'(MAINT_SLOTS));
 
   // ------------------------------------------------------------------
   // refresh due timer (free-running) + debt (saturating)
@@ -126,24 +118,21 @@ module hades_refresh_sched
   end
 
   // ------------------------------------------------------------------
-  // issue FSM: refresh first, then ZQCS, handshakes inside the window
+  // issue FSM: refresh first, then ZQCS, gated to engine idle (2026-10-21
+  // A4 finding: a refresh inside a 64-port full-load drain blocks AR for
+  // ~120-285 ui cycles and pushes the tail ports past the L=1 window; the
+  // per-period idle gap after the drain absorbs single refreshes AND
+  // catch-up pairs with zero port impact.  Debt/urgency unchanged, so the
+  // long-run rate stays exact and pathological backlogs still force
+  // service mid-load.)
   // ------------------------------------------------------------------
   typedef enum logic [1:0] {S_IDLE, S_REF, S_ZQ} state_e;
   state_e state;
 
-  logic [1:0] refs_this_win;
-
-  always_ff @(posedge ui_clk) begin
-    if (ui_rst)            refs_this_win <= 2'd0;
-    else if (period_tick)  refs_this_win <= 2'd0;
-    else if (ref_ack_fire) refs_this_win <= refs_this_win + 2'd1;
-  end
-
   wire logic urgency   = (ref_debt >= 4'd4);
   wire logic ref_allow = (ref_debt != 4'd0)
-                         && (urgency || !enable
-                             || (win_open && refs_this_win < 2'd2));
-  wire logic zq_allow  = zq_due && (!enable || win_open);
+                         && (urgency || !enable || engine_idle);
+  wire logic zq_allow  = zq_due && (!enable || engine_idle);
 
   assign ref_ack_fire = (state == S_REF) && app_ref_ack;
   assign zq_ack_fire  = (state == S_ZQ)  && app_zq_ack;

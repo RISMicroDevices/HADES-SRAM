@@ -111,6 +111,11 @@ test-vcs: $(foreach v,$(VCS_VARIANTS),$(BUILD)/vcs_$(v)/simv)
 	grep -q HADES_TEST_PASS $(BUILD)/vcs_st/run_t2.log \
 	  && echo "VCS st t2: PASS" \
 	  || { echo "VCS st t2: FAIL (see $(BUILD)/vcs_st/run_t2.log)"; fail=1; }; \
+	echo "=== VCS st TEST=st_full +REF_BLOCK=300 (A4-in-sim: 64-port drain vs refresh) ==="; \
+	./$(BUILD)/vcs_st/simv +TEST=st_full +REF_BLOCK=300 > $(BUILD)/vcs_st/run_st_full.log 2>&1; \
+	grep -q HADES_TEST_PASS $(BUILD)/vcs_st/run_st_full.log \
+	  && echo "VCS st st_full: PASS" \
+	  || { echo "VCS st st_full: FAIL (see $(BUILD)/vcs_st/run_st_full.log)"; fail=1; }; \
 	echo "=== VCS csr TEST=t10 T10_PER=1000000 (long regression) ==="; \
 	./$(BUILD)/vcs_csr/simv +TEST=t10 +T10_PER=1000000 +WDOG_MS=4000 \
 	  > $(BUILD)/vcs_csr/run_t10.log 2>&1; \
@@ -192,6 +197,12 @@ test-xsim: $(foreach v,$(XSIM_VARIANTS),$(BUILD)/xsim_$(v)/snap)
 	grep -q HADES_TEST_PASS $(BUILD)/xsim_st/run_t2.log \
 	  && echo "xsim st t2: PASS" \
 	  || { echo "xsim st t2: FAIL (see $(BUILD)/xsim_st/run_t2.log)"; fail=1; }; \
+	echo "=== xsim st TEST=st_full REF_BLOCK=300 (A4-in-sim: 64-port drain vs refresh) ==="; \
+	cd $(BUILD)/xsim_st && $(VIVADO_BIN)/xsim snap -R -testplusarg TEST=st_full \
+	  -testplusarg REF_BLOCK=300 > run_st_full.log 2>&1; cd ../..; \
+	grep -q HADES_TEST_PASS $(BUILD)/xsim_st/run_st_full.log \
+	  && echo "xsim st st_full: PASS" \
+	  || { echo "xsim st st_full: FAIL (see $(BUILD)/xsim_st/run_st_full.log)"; fail=1; }; \
 	echo "=== xsim csr TEST=t10 T10_PER=50000 (reduced) ==="; \
 	cd $(BUILD)/xsim_csr && $(VIVADO_BIN)/xsim snap -R -testplusarg TEST=t10 \
 	  -testplusarg T10_PER=50000 -testplusarg WDOG_MS=300 > run_t10.log 2>&1; cd ../..; \

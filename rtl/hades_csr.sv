@@ -375,7 +375,16 @@ module hades_csr
   // ------------------------------------------------------------------
   // Outputs
   // ------------------------------------------------------------------
-  assign enable = enable_req & allow_en & (soft_cnt == 14'd0) & ~port_rst_busy;
+  // registered (300 MHz closure, 2026-10-21): the comb cone (14-bit
+  // soft_cnt compare + interlocks) fanned out into every engine CE in the
+  // design and missed ui_clk.  Consumers tolerate one cycle of latency —
+  // ENABLE/SOFT_RESET are quiesced, CSR-paced operations.
+  logic enable_q;
+  always_ff @(posedge ui_clk) begin
+    if (ui_rst) enable_q <= 1'b0;
+    else        enable_q <= enable_req & allow_en & (soft_cnt == 14'd0) & ~port_rst_busy;
+  end
+  assign enable = enable_q;
 
   always_comb begin
     cfg.latency      = latency_active;

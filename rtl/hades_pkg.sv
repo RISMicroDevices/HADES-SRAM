@@ -47,6 +47,11 @@ package hades_pkg;
   localparam int MARGIN              = 100;   // required residual headroom
   localparam int TARGET_PERIOD_500K  = 600;   // ui_clk cycles @ 500 KHz
   localparam int TARGET_PERIOD_100K  = 3000;  // ui_clk cycles @ 100 KHz
+  // pessimistic ui-cycle length of one maintenance AR-block on the real MIG
+  // (single tRFC-class op; measured 61-127 on VCU1525 — longer events were
+  // back-to-back pairs, which the deadline/debt mechanics split across
+  // periods) — the arbiter's maint_fire_ok deadline, see hades_arbiter
+  localparam int MAINT_BLOCK_EST     = 150;
 
   function automatic int cdc_ovhd(input clk_mode_e m);
     return (m == CLK_MODE_SYNC) ? CDC_OVHD_SYNC : CDC_OVHD_ASYNC;

@@ -26,11 +26,21 @@ xsc.dir/
 *.backup.log
 vivado*.jou
 vivado*.log
+.tmpCRC/
+clockInfo.txt
+iter_*_CongestedCLBsAndNets.txt
+tight_setup_hold_pins.txt
 # --- FPGA build outputs ---
 *.bit
 *.ltx
 fpga/vcu1525/spike/work/
 fpga/vcu1525/spike/ex_proj/
+fpga/vcu1525/build/
+fpga/vcu1525/work_*/
+ip/work_pkg/
+ip/work_verify/
+ip/hades_sram_1.0/
+*.csv
 # --- Misc ---
 __pycache__/
 *.o

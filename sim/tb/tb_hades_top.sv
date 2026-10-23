@@ -17,7 +17,9 @@
 // maintenance alignment), TEST=t14 +RD_LAT_ADD=1500 (bit5 sentinel fault),
 // TEST=t8 +DROP_RD_BEAT/+DROP_RD_BEAT2/+SLVERR_RD_BEAT/+SLVERR_WR_BEAT
 // (error paths), TEST=ovf +AR_STALL_LEN=8000 (request-FIFO overflow),
-// TEST=t10 +T10_PER=n (long regression; +WDOG_MS raises the watchdog).
+// TEST=t10 +T10_PER=n (long regression; +WDOG_MS raises the watchdog),
+// TEST=st_full +REF_BLOCK=300 (st variant; 64-port full-load selftest under
+// pessimistic maintenance blocking — the A4 board scenario).
 //
 // Clocks: ui_clk 300 MHz.  SYNC: port_clk derived from ui_clk by integer
 // divider (same-source).  ASYNC: independent realtime generator,
@@ -1550,6 +1552,54 @@ module tb_hades_top;
   endtask
 
   // ------------------------------------------------------------------
+  // st_full (M5-hw: the A4 board scenario, in sim): 64-port full-load
+  // selftest under pessimistic maintenance (run with +REF_BLOCK=300 on the
+  // st variant).  The 64-port drain plus a refresh AR-block must fit inside
+  // the L=1 window at 500 KHz.  The 2026-10-21 board failure (PORT_STAT_ERR
+  // on tail ports 47+) only reproduces with a realistic refresh block — the
+  // default REF_BLOCK=105 is too kind.  Criteria: ERR_STATUS and all 64
+  // PORT_STAT_ERR stay 0 at L=2 and at L=1.
+  // ------------------------------------------------------------------
+  task automatic test_st_full();
+    logic [31:0] rd, err_cnt;
+    begin
+      hades_log("--- ST_FULL: 64-port selftest under pessimistic refresh ---");
+      calib_done = 1'b1;
+      csr_default_map();
+      csr_enable(2, {64{1'b1}}, 64);
+      hades_suspend_checks(1);
+      axil_wr(CSR_CTRL, 32'h5);            // ENABLE|SELFTEST
+      repeat (1200) @(posedge port_clk);   // ~340 refresh dues at div=2100
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("ST_FULL: ERR_STATUS clean at L=2", rd & 32'h3F, 32'h0);
+      for (int i = 0; i < 64; i++) begin
+        axil_wr(CSR_PORT_SEL, 32'(i));
+        axil_rd(CSR_PORT_STAT_ERR, err_cnt);
+        hades_check_eq($sformatf("ST_FULL: PORT_STAT_ERR[%0d]=0 at L=2", i),
+                       err_cnt, 32'h0);
+      end
+      // quiesce the engines before dropping ENABLE (documented host rule)
+      axil_wr(CSR_CTRL, 32'h1);
+      repeat (16) @(posedge port_clk);
+      csr_enable(1, {64{1'b1}}, 64);
+      axil_wr(CSR_CTRL, 32'h5);
+      repeat (1200) @(posedge port_clk);
+      axil_rd(CSR_ERR_STATUS, rd);
+      hades_check_eq("ST_FULL: ERR_STATUS clean at L=1", rd & 32'h3F, 32'h0);
+      for (int i = 0; i < 64; i++) begin
+        axil_wr(CSR_PORT_SEL, 32'(i));
+        axil_rd(CSR_PORT_STAT_ERR, err_cnt);
+        hades_check_eq($sformatf("ST_FULL: PORT_STAT_ERR[%0d]=0 at L=1", i),
+                       err_cnt, 32'h0);
+      end
+      axil_wr(CSR_CTRL, 32'h1);
+      repeat (16) @(posedge port_clk);
+      hades_suspend_checks(0);
+      axil_wr(CSR_CTRL, 32'h0);
+    end
+  endtask
+
+  // ------------------------------------------------------------------
   // T12: configuration reload — run, DISABLE, change N/L/CFG_MIN_PERIOD,
   // re-ENABLE; behavior follows the new configuration with no state leak.
   // Also covers SOFT_RESET stat clearing and the CSR read sweep.
@@ -1984,6 +2034,7 @@ module tb_hades_top;
 `ifndef CSR_STATIC
     else if (test == "t12") begin calib_done = 1'b1; test_t12();    end
     else if (test == "selftest")             test_selftest();
+    else if (test == "st_full")              test_st_full();
     else if (test == "t13b") begin calib_done = 1'b1; test_t13b();  end
     else if (test == "rst")  begin calib_done = 1'b1; test_rst();   end
     else if (test == "ovf")  begin calib_done = 1'b1; test_ovf();   end
@@ -2014,10 +2065,6 @@ module tb_hades_top;
     $display("HADES_TEST_FAIL: watchdog timeout");
     $finish;
   end
-
-
-
-
 
 endmodule
 

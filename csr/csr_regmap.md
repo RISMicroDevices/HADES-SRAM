@@ -1,6 +1,6 @@
 # HADES-SRAM CSR Register Map (CSR_EN=1)
 
-AXI4-Lite slave, 32-bit data, `ui_clk` domain (300 MHz). On VCU1525 reached via the XDMA AXI4-Lite BAR (base 0x0_0000 by default). All offsets are byte offsets.
+AXI4-Lite slave, 32-bit data, `ui_clk` domain (300 MHz). On the VCU1525 build reached via JTAG-AXI at `0x0000_0000` on the board crossbar (board_ctrl registers live at `0x0001_0000`; the integration is AXI4-Lite BAR-compatible for a future PCIe/XDMA host path). All offsets are byte offsets.
 
 General rules (spec §3.3):
 - Unimplemented bits and unlisted offsets read as 0; writes to them are ignored (no bus error, no side effect).

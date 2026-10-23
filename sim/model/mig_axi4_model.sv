@@ -98,14 +98,19 @@ module mig_axi4_model #(
   bit drop_en, slv_rd_en, slv_wr_en, drop2_en;
   bit drop_done, slv_rd_done, slv_wr_done, drop2_done;   // 2-state: default 0
   bit stall_started;                        // 2-state: default 0
+  int  ref_block_eff, zq_block_eff;         // runtime-overridable blocks
   longint unsigned stall_until;
   initial begin
     rd_lat_add   = 0;
     maint_stress = 0;
     ar_stall_len = 0;
+    ref_block_eff = REF_BLOCK;
+    zq_block_eff  = ZQ_BLOCK;
     void'($value$plusargs("RD_LAT_ADD=%d", rd_lat_add));
     void'($value$plusargs("MAINT_STRESS=%d", maint_stress));
     void'($value$plusargs("AR_STALL_LEN=%d", ar_stall_len));
+    void'($value$plusargs("REF_BLOCK=%d", ref_block_eff));
+    void'($value$plusargs("ZQ_BLOCK=%d", zq_block_eff));
     drop_en   = $value$plusargs("DROP_RD_BEAT=%h", drop_beat);
     drop2_en  = $value$plusargs("DROP_RD_BEAT2=%h", drop_beat2);
     slv_rd_en = $value$plusargs("SLVERR_RD_BEAT=%h", slv_rd_beat);
@@ -116,6 +121,9 @@ module mig_axi4_model #(
       $display("[MIG-MODEL] MAINT_STRESS=1 (T3 worst-case maintenance)");
     if (ar_stall_len != 0)
       $display("[MIG-MODEL] AR_STALL_LEN=%0d (overflow fault)", ar_stall_len);
+    if (ref_block_eff != REF_BLOCK || zq_block_eff != ZQ_BLOCK)
+      $display("[MIG-MODEL] REF_BLOCK=%0d ZQ_BLOCK=%0d (pessimistic maintenance)",
+               ref_block_eff, zq_block_eff);
     if (drop_en)
       $display("[MIG-MODEL] DROP_RD_BEAT=%h (T8 timeout fault)", drop_beat);
     if (drop2_en)
@@ -151,10 +159,10 @@ module mig_axi4_model #(
     end else if (ref_ack_rise) begin
       // MAINT_STRESS (T3): a periodic read lands in the same window,
       // concatenated right behind the refresh block
-      busy_until <= ((cyc > busy_until) ? cyc : busy_until) + REF_BLOCK
+      busy_until <= ((cyc > busy_until) ? cyc : busy_until) + ref_block_eff
                     + (maint_stress != 0 ? PRD_BLOCK : 0);
     end else if (zq_ack_rise) begin
-      busy_until <= ((cyc > busy_until) ? cyc : busy_until) + ZQ_BLOCK;
+      busy_until <= ((cyc > busy_until) ? cyc : busy_until) + zq_block_eff;
     end
   end
 
@@ -168,9 +176,10 @@ module mig_axi4_model #(
 
   // ------------------------------------------------------------------
   // read channel: accept -> due-cycle queue -> in-order return
+  // (ids echoed: the DUT tracks responses per AXI ID since M5-hw)
   // ------------------------------------------------------------------
   typedef struct packed { longint unsigned due; logic [39:0] addr;
-                          logic [1:0] resp; } rd_ent_t;
+                          logic [1:0] resp; logic [3:0] id; } rd_ent_t;
   rd_ent_t rd_q[$];
 
   // registered ready/accept flags (queue size() is not legal in continuous
@@ -225,6 +234,7 @@ module mig_axi4_model #(
               + m_rnd(RD_JITTER) + rd_lat_add;
         e.due  = cyc + lat;
         e.addr = s_axi_araddr;
+        e.id   = s_axi_arid;
         e.resp = (slv_rd_en && !slv_rd_done && beat == slv_rd_beat) ? 2'b10
                                                                      : 2'b00;
         if (e.resp != 2'b00) begin
@@ -260,7 +270,7 @@ module mig_axi4_model #(
         s_axi_rdata  <= mdata;
         s_axi_rvalid <= 1'b1;
         s_axi_rlast  <= 1'b1;
-        s_axi_rid    <= 4'd0;
+        s_axi_rid    <= e.id;
         s_axi_rresp  <= e.resp;
         r_held       <= 1'b1;
       end
@@ -270,8 +280,10 @@ module mig_axi4_model #(
   // ------------------------------------------------------------------
   // write channel: AW queue, W applies on wlast, B after WR_LAT
   // ------------------------------------------------------------------
-  logic [39:0] aw_q[$];
-  typedef struct packed { longint unsigned due; logic [1:0] resp; } b_ent_t;
+  typedef struct packed { logic [39:0] addr; logic [3:0] id; } aw_ent_t;
+  aw_ent_t aw_q[$];
+  typedef struct packed { longint unsigned due; logic [1:0] resp;
+                          logic [3:0] id; } b_ent_t;
   b_ent_t b_due_q[$];
 
   always_ff @(posedge aclk) begin
@@ -279,18 +291,25 @@ module mig_axi4_model #(
       aw_q.delete();
       b_due_q.delete();
     end else begin
-      if (s_axi_awvalid && s_axi_awready)
-        aw_q.push_back(s_axi_awaddr);
+      if (s_axi_awvalid && s_axi_awready) begin
+        aw_ent_t ae;
+        ae.addr = s_axi_awaddr;
+        ae.id   = s_axi_awid;
+        aw_q.push_back(ae);
+      end
       if (s_axi_wvalid && s_axi_wready && s_axi_wlast) begin
         longint unsigned beat;
         logic [511:0] cur;
         b_ent_t be;
-        beat = aw_q.pop_front() >> 6;
+        aw_ent_t ae;
+        ae = aw_q.pop_front();
+        beat = ae.addr >> 6;
         cur  = mem.exists(beat) ? mem[beat] : 512'd0;
         for (int b = 0; b < 64; b++)
           if (s_axi_wstrb[b]) cur[b*8 +: 8] = s_axi_wdata[b*8 +: 8];
         mem[beat] = cur;
         be.due  = cyc + WR_LAT;
+        be.id   = ae.id;
         be.resp = (slv_wr_en && !slv_wr_done && beat == slv_wr_beat) ? 2'b10
                                                                       : 2'b00;
         if (be.resp != 2'b00) begin
@@ -315,6 +334,7 @@ module mig_axi4_model #(
         b_ent_t be;
         be = b_due_q.pop_front();
         s_axi_bvalid <= 1'b1;
+        s_axi_bid    <= be.id;
         s_axi_bresp  <= be.resp;
       end
     end
