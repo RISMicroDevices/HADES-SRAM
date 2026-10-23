@@ -17,4 +17,15 @@ if {![llength [get_ipdefs -quiet rismd.cn:hades:hades_sram:1.0]]} {
 
 start_gui
 start_ip_gui -vlnv rismd.cn:hades:hades_sram:1.0 -module_name hades_sram_0
-puts "HADES-GUI: hades_sram customization dialog opened (scratch project: $here/work_gui)"
+# The customization scope builds in an ASYNC GUI event after this command
+# returns — a Tcl-clean return proves nothing (failure signature: Common
+# 17-190 rdi::create_slave + IP_Flow 19-883/19-3428 + rollback per 19-5622).
+# Let events drain, then verify the instance actually exists; on failure,
+# fall back to a plain create_ip (the GUI-then-double-click path is robust).
+after 3000
+if {[llength [get_ips -quiet hades_sram_0]]} {
+  puts "HADES-GUI PASS: hades_sram_0 customization dialog opened (scratch project: $here/work_gui)"
+} else {
+  puts "HADES-GUI: start_ip_gui scope failed (see IP_Flow errors above) — fell back to create_ip; double-click hades_sram_0 under Design Sources to customize"
+  create_ip -name hades_sram -vendor rismd.cn -library hades -module_name hades_sram_0
+}
