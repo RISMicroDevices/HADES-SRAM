@@ -5,7 +5,7 @@
 # any integrator.
 #
 # ui_clk (300 MHz MIG user clock) and port_clk (100-500 KHz, independent
-# source) are asynchronous; only the whitelist cells of rtl/hades_cdc.sv
+# source) are asynchronous; only the whitelist cells of rtl/hades_sram_cdc.sv
 # cross.  Acceptance (A1): report_cdc zero violations.
 # =============================================================================
 
@@ -14,7 +14,7 @@ set_clock_groups -asynchronous \
     -group [get_clocks -include_generated_clocks -of_objects [get_ports ui_clk]] \
     -group [get_clocks -include_generated_clocks -of_objects [get_ports port_clk]]
 
-# whitelist 2-flop synchronizers (hades_sync2, hades_rst_sync): bound the
+# whitelist 2-flop synchronizers (hades_sram_sync2, hades_sram_rst_sync): bound the
 # delay into the first (ASYNC_REG) stage; ui_clk is 300 MHz for this IP
 set_max_delay -datapath_only 3.3 \
     -to [get_cells -hier -filter {NAME =~ */s1_reg && IS_SEQUENTIAL}] -quiet

@@ -13,7 +13,7 @@
 //-----------------------------------------------------------------------------
 `default_nettype none
 
-module hades_timing_shaper #(
+module hades_sram_timing_shaper #(
   parameter int DW = 32
 ) (
   input  wire logic           port_clk,

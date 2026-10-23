@@ -10,7 +10,7 @@
 #                    A10b deviation)
 #
 # Outputs under build/<MODE>[-<SRC>]/ :
-#   hades_vcu1525_<tag>.bit / .ltx, reports/ (timing, cdc [ASYNC], util, drc)
+#   hades_sram_vcu1525_<tag>.bit / .ltx, reports/ (timing, cdc [ASYNC], util, drc)
 #
 # A1 gates (scripted): WNS >= 0 everywhere; ASYNC additionally requires
 # report_cdc zero violations.
@@ -35,7 +35,7 @@ file mkdir $bdir
 puts "HADES-BUILD: mode=$mode clksrc=$clksrc -> $bdir"
 
 # ---------------------------------------------------------------- project --
-create_project -force hades_vcu1525_$tag $bdir/proj -part xcvu9p-fsgd2104-2L-e
+create_project -force hades_sram_vcu1525_$tag $bdir/proj -part xcvu9p-fsgd2104-2L-e
 set_property board_part xilinx.com:vcu1525:part0:1.3 [current_project]
 set_property target_language Verilog [current_project]
 
@@ -101,7 +101,7 @@ if {$is_sync} {
   else                   { read_xdc $here/pins_async_mmcm.xdc }
 }
 
-set_property top hades_board_top [current_fileset]
+set_property top hades_sram_board_top [current_fileset]
 set_property generic SYNC_MODE=$is_sync [get_filesets sources_1]
 
 generate_target all [get_ips]
@@ -167,7 +167,7 @@ if {[get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -setup]] < 0} {
   phys_opt_design -directive AggressiveExplore
   route_design -directive NoTimingRelaxation
 }
-write_debug_probes -force $bdir/hades_vcu1525_${tag}.ltx
+write_debug_probes -force $bdir/hades_sram_vcu1525_${tag}.ltx
 # keep the routed database: post-build timing triage queries (report_timing
 # on the worst cones) read this instead of re-running place+route
 write_checkpoint -force $bdir/post_route.dcp
@@ -183,7 +183,7 @@ if {!$is_sync} {
   report_cdc -details -file $bdir/reports/cdc.rpt
 }
 
-write_bitstream -force $bdir/hades_vcu1525_${tag}.bit
+write_bitstream -force $bdir/hades_sram_vcu1525_${tag}.bit
 
 # ---------------------------------------------------------------- A1 gate --
 set wns [get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -setup]]
@@ -198,5 +198,5 @@ if {!$is_sync} {
   if {$cdc_viol != 0} { puts "HADES-BUILD FAIL: report_cdc violations"; exit 1 }
 }
 
-puts "HADES-BUILD PASS: $bdir/hades_vcu1525_${tag}.bit"
+puts "HADES-BUILD PASS: $bdir/hades_sram_vcu1525_${tag}.bit"
 exit 0

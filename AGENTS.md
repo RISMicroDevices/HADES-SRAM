@@ -19,7 +19,7 @@
 
 ## Design rules (spec §4, do not violate)
 - Two clock domains: `ui_clk` (300 MHz) and `port_clk` (100–500 KHz); `CLK_MODE ∈ {SYNC(default), ASYNC}`
-- ASYNC CDC only via whitelist in `rtl/hades_cdc.sv` (`hades_sync2`, `hades_qs_bus`, `hades_rst_sync`) — no bare cross-domain wires
+- ASYNC CDC only via whitelist in `rtl/hades_sram_cdc.sv` (`hades_sram_sync2`, `hades_sram_qs_bus`, `hades_sram_rst_sync`) — no bare cross-domain wires
 - `CSR_EN ∈ {1(default), 0}`: CSR-configurable vs static hard-wired (params `P_*`, incl. flat per-port `P_PORT_BASE`/`P_PORT_SIZE` vectors); both produce the same internal `cfg_t`
 - Slot budget static assertion in `hades_sram_top` must pass for any shipped parameter set
 - Style: SV-2012, `` `default_nettype none ``, synchronous resets, no latches, 2-process FSMs, `for generate` for port arrays

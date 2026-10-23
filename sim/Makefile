@@ -21,14 +21,14 @@ VIVADO   := /home/kumon/Xilinx/Vivado/2024.1
 VIVADO_BIN := $(VIVADO)/bin
 BUILD    := build
 
-RTL := ../rtl/hades_pkg.sv ../rtl/hades_cdc.sv ../rtl/hades_freq_mon.sv \
-       ../rtl/hades_selftest.sv ../rtl/hades_csr.sv ../rtl/hades_port.sv \
-       ../rtl/hades_timing_shaper.sv \
-       ../rtl/hades_mig_if.sv ../rtl/hades_refresh_sched.sv \
-       ../rtl/hades_arbiter.sv ../rtl/hades_backdoor.sv ../rtl/hades_sram_top.sv
+RTL := ../rtl/hades_sram_pkg.sv ../rtl/hades_sram_cdc.sv ../rtl/hades_sram_freq_mon.sv \
+       ../rtl/hades_sram_selftest.sv ../rtl/hades_sram_csr.sv ../rtl/hades_sram_port.sv \
+       ../rtl/hades_sram_timing_shaper.sv \
+       ../rtl/hades_sram_mig_if.sv ../rtl/hades_sram_refresh_sched.sv \
+       ../rtl/hades_sram_arbiter.sv ../rtl/hades_sram_backdoor.sv ../rtl/hades_sram_top.sv
 TB  := tb/tb_hades_top.sv
 MDL := model/mig_axi4_model.sv
-CPP := cpp/hades_tb.cpp
+CPP := cpp/hades_sram_tb.cpp
 
 RTL_ABS := $(abspath $(RTL))
 TB_ABS  := $(abspath $(TB))

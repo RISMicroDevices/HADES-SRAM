@@ -30,8 +30,8 @@
 //-----------------------------------------------------------------------------
 `default_nettype none
 
-module hades_refresh_sched
-  import hades_pkg::*;
+module hades_sram_refresh_sched
+  import hades_sram_pkg::*;
 (
   input  wire logic        ui_clk,
   input  wire logic        ui_rst,       // synchronous (top passes ui_rst_soft)
@@ -58,7 +58,7 @@ module hades_refresh_sched
   // ------------------------------------------------------------------
   logic pclk_u, pclk_d;
 
-  hades_sync2 u_tick_sync (.clk(ui_clk), .rst(ui_rst), .d(port_clk), .q(pclk_u));
+  hades_sram_sync2 u_tick_sync (.clk(ui_clk), .rst(ui_rst), .d(port_clk), .q(pclk_u));
 
   always_ff @(posedge ui_clk) begin
     if (ui_rst) pclk_d <= 1'b0;

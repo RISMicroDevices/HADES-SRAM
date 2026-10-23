@@ -13,20 +13,20 @@
 //    fault-only logic, unreachable in legal operation — the slot budget
 //    (spec 4.3) guarantees a free slot at every response by construction.
 
-MODULE: hades_mig_if
+MODULE: hades_sram_mig_if
 Fsm rd_state "633467097"
 Transition RD_ISSUE->RD_IDLE "3->0"
 Transition RD_SYNTH->RD_IDLE "4->0"
 Transition RD_PICK->RD_IDLE "1->0"
 Transition RD_PREP->RD_IDLE "2->0"
 
-MODULE: hades_mig_if
+MODULE: hades_sram_mig_if
 Fsm wr_state "2465945103"
 Transition WR_ISSUE->WR_IDLE "3->0"
 Transition WR_PREP->WR_IDLE "2->0"
 Transition WR_PICK->WR_IDLE "1->0"
 
-MODULE: hades_backdoor
+MODULE: hades_sram_backdoor
 Fsm state "2639661931"
 Transition B_RD->B_IDLE "1->0"
 

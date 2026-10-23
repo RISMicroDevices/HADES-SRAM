@@ -21,8 +21,8 @@
 //-----------------------------------------------------------------------------
 `default_nettype none
 
-module hades_csr
-  import hades_pkg::*;
+module hades_sram_csr
+  import hades_sram_pkg::*;
 #(
   parameter bit IS_SYNC = 1'b1,   // 1: CLK_MODE SYNC, 0: ASYNC (PARAMS.bit31)
   parameter int DW            = DW_DEFAULT,
@@ -86,7 +86,7 @@ module hades_csr
   output          logic [7:0]   port_sel_o,
   output          logic         selftest_run,   // CTRL.SELFTEST (0 when !SELFTEST_EN)
 
-  // backdoor command channel (M4): registers here, engine in hades_backdoor
+  // backdoor command channel (M4): registers here, engine in hades_sram_backdoor
   output          logic         bkp_go_rd,      // 1-cycle strobes
   output          logic         bkp_go_wr,
   output          logic [7:0]   bkp_port_o,

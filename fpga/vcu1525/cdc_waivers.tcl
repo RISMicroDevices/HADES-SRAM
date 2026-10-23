@@ -15,7 +15,7 @@
 # -- qs_bus quasi-static CSR configuration, ui_clk -> port_clk -------------
 # u_csr config (port_en, latency parameters, ...) is written only while the
 # core is quiesced (hades_quiesce host discipline) and crosses through
-# hades_qs_bus STAGES=0 (pure wires -> report_cdc sees "unknown circuitry").
+# hades_sram_qs_bus STAGES=0 (pure wires -> report_cdc sees "unknown circuitry").
 # Wire delay bounded by set_max_delay -datapath_only 10 (timing_async_cross.xdc).
 foreach id {CDC-1 CDC-13 CDC-15} {
   create_waiver -type CDC -id $id \

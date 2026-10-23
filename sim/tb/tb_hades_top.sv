@@ -1,7 +1,7 @@
 //-----------------------------------------------------------------------------
 // HADES-SRAM — SV testbench harness (M5).
 // Pin-level protocol here (dual clocks, resets, AXI4-Lite BFM, SRAM port
-// drivers/monitors, MIG model wiring); test intent in sim/cpp/hades_tb.cpp
+// drivers/monitors, MIG model wiring); test intent in sim/cpp/hades_sram_tb.cpp
 // via DPI-C (expected memory, exact-latency due-cycle queues, accounting).
 //
 // Build variants (+define+):
@@ -30,7 +30,7 @@
 `default_nettype none
 
 module tb_hades_top;
-  import hades_pkg::*;
+  import hades_sram_pkg::*;
 
   // ------------------------------------------------------------------
   // Build-variant parameters

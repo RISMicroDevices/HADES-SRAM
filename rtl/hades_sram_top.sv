@@ -11,20 +11,20 @@
 //                 the per-port flat vectors P_PORT_BASE / P_PORT_SIZE, fully
 //                 user-overridable), auto-enable, pin-level status/backdoor.
 //
-// M2: full single/multi-port datapath — hades_port (CDC + shaper) array ->
-// hades_mig_if (FCFS engine, AXI4, outstanding).  M3: hades_refresh_sched
+// M2: full single/multi-port datapath — hades_sram_port (CDC + shaper) array ->
+// hades_sram_mig_if (FCFS engine, AXI4, outstanding).  M3: hades_sram_refresh_sched
 // (user refresh/ZQCS, maintenance window at the slot-table head).
-// M4: hades_arbiter (TDMA static slot gating in front of mig_if) +
-// hades_backdoor (CSR/pin host channel, lowest-priority requester).
+// M4: hades_sram_arbiter (TDMA static slot gating in front of mig_if) +
+// hades_sram_backdoor (CSR/pin host channel, lowest-priority requester).
 //-----------------------------------------------------------------------------
 `default_nettype none
 
 module hades_sram_top
-  import hades_pkg::*;
+  import hades_sram_pkg::*;
 #(
-  // NOTE: defaults are plain literals (not hades_pkg constants) because the
+  // NOTE: defaults are plain literals (not hades_sram_pkg constants) because the
   // Vivado IP packager cannot resolve package references in parameter
-  // defaults; values must match hades_pkg (N_MAX=64, DW=32, AW=22, 500 KHz
+  // defaults; values must match hades_sram_pkg (N_MAX=64, DW=32, AW=22, 500 KHz
   // target = 600 ui_clk cycles)
   parameter int  N                    = 64,      // active ports (<= N_MAX)
   parameter int  DW                   = 32,
@@ -90,7 +90,7 @@ module hades_sram_top
   input  wire                   m_axi_rvalid,
   output          logic               m_axi_rready,
 
-  // ---- MIG user refresh / ZQCS (spec 3.2) — driven by hades_refresh_sched ----
+  // ---- MIG user refresh / ZQCS (spec 3.2) — driven by hades_sram_refresh_sched ----
   output          logic               app_ref_req,
   input  wire                   app_ref_ack,
   output          logic               app_zq_req,
@@ -137,7 +137,7 @@ module hades_sram_top
   // ------------------------------------------------------------------
   if (!budget_ok(N, TARGET_PERIOD_CYCLES, IS_SYNC ? CLK_MODE_SYNC : CLK_MODE_ASYNC))
   begin : g_budget_violation
-    HADES_SLOT_BUDGET_EXCEEDED__reduce_N_or_lower_target_frequency u_forced_error();
+    HADES_SRAM_SLOT_BUDGET_EXCEEDED__reduce_N_or_lower_target_frequency u_forced_error();
 `ifndef SYNTHESIS
     initial $error("HADES-SRAM: slot budget exceeded (N=%0d, target=%0d ui_clk cycles)",
                    N, TARGET_PERIOD_CYCLES);
@@ -148,8 +148,8 @@ module hades_sram_top
   // Resets
   // ------------------------------------------------------------------
   logic ui_rst, port_rst;
-  hades_rst_sync u_rst_ui   (.clk(ui_clk),   .arst_n(ui_rst_n),   .srst(ui_rst));
-  hades_rst_sync u_rst_port (.clk(port_clk), .arst_n(port_rst_n), .srst(port_rst));
+  hades_sram_rst_sync u_rst_ui   (.clk(ui_clk),   .arst_n(ui_rst_n),   .srst(ui_rst));
+  hades_sram_rst_sync u_rst_port (.clk(port_clk), .arst_n(port_rst_n), .srst(port_rst));
 
   // ------------------------------------------------------------------
   // Boundary input registering (300 MHz closure, M5-hw): calib_done and the
@@ -179,7 +179,7 @@ module hades_sram_top
   cfg_t        cfg_eff;
   logic        enable_eff;
 
-  hades_freq_mon #(
+  hades_sram_freq_mon #(
     .CLK_MODE_SYNC (IS_SYNC)
   ) u_freq_mon (
     .ui_clk      (ui_clk),
@@ -254,10 +254,10 @@ module hades_sram_top
       // return path for the soft-reset stretch: the CSR gates ENABLE
       // (READY reads 0) until the port domain has truly exited reset
       logic soft_port_u;
-      hades_sync2 u_soft_back (.clk(ui_clk), .rst(ui_rst),
+      hades_sram_sync2 u_soft_back (.clk(ui_clk), .rst(ui_rst),
                                .d(soft_port), .q(soft_port_u));
 
-      hades_csr #(
+      hades_sram_csr #(
         .IS_SYNC     (IS_SYNC),
         .DW          (DW),
         .SELFTEST_EN (SELFTEST_EN)
@@ -349,7 +349,7 @@ module hades_sram_top
       // pin-level backdoor drive: req synced; the integrator holds the
       // fields stable while req is high; ack = done pulse (above)
       logic bkp_req_u, bkp_req_d;
-      hades_sync2 u_bkp_req_sync (.clk(ui_clk), .rst(ui_rst),
+      hades_sram_sync2 u_bkp_req_sync (.clk(ui_clk), .rst(ui_rst),
                                   .d(bkp_req), .q(bkp_req_u));
       always_ff @(posedge ui_clk) begin
         if (ui_rst) bkp_req_d <= 1'b0;
@@ -411,12 +411,12 @@ module hades_sram_top
     end
   end
 
-  hades_sync2 u_soft_sync (.clk(port_clk), .rst(port_rst), .d(soft_lvl), .q(soft_port));
+  hades_sram_sync2 u_soft_sync (.clk(port_clk), .rst(port_rst), .d(soft_lvl), .q(soft_port));
   wire logic port_rst_eff = port_rst | soft_port;
   wire logic ui_rst_soft  = ui_rst | soft_reset_stb;
 
   // ------------------------------------------------------------------
-  // Backend engine: TDMA slot gating (M4: hades_arbiter) in front of the
+  // Backend engine: TDMA slot gating (M4: hades_sram_arbiter) in front of the
   // FCFS engine; backdoor enters mig_if as the lowest-priority requester.
   // ------------------------------------------------------------------
   logic [N-1:0]          pr_rd_vld;  // port FIFO heads (raw)
@@ -441,7 +441,7 @@ module hades_sram_top
   logic [5:0]            bk_wr_lane;
   logic [DW-1:0]         bk_wr_data;
 
-  hades_arbiter #(
+  hades_sram_arbiter #(
     .N       (N),
     .IS_SYNC (IS_SYNC)
   ) u_arbiter (
@@ -460,7 +460,7 @@ module hades_sram_top
     .maint_fire_ok (maint_fire_ok)
   );
 
-  hades_mig_if #(
+  hades_sram_mig_if #(
     .N  (N),
     .DW (DW),
     .AW (AW)
@@ -536,7 +536,7 @@ module hades_sram_top
     .bkp_wr_gnt    (bk_wr_gnt)
   );
 
-  hades_backdoor #(
+  hades_sram_backdoor #(
     .DW (DW),
     .AW (AW)
   ) u_backdoor (
@@ -577,7 +577,7 @@ module hades_sram_top
   logic [N-1:0] win_stky,  ovf_stky;    // port_clk sticky levels (from ports)
 
   for (genvar i = 0; i < N; i++) begin : g_ports
-    hades_port #(
+    hades_sram_port #(
       .AW           (AW),
       .DW           (DW),
       .IS_SYNC      (IS_SYNC),
@@ -620,7 +620,7 @@ module hades_sram_top
 
   // ------------------------------------------------------------------
   // Error-event plumbing
-  //  - window/overflow records are kept per port inside hades_port (sticky
+  //  - window/overflow records are kept per port inside hades_sram_port (sticky
   //    level for the static pin mirror + event toggle).  The toggles cross
   //    to ui_clk through sync2 + edge detect into 1-cycle pulses; ERR_STATUS
   //    bits 2/5 are set by these pulses, so a W1C clear sticks (a level
@@ -646,7 +646,7 @@ module hades_sram_top
     end
   end
 
-  hades_sync2 u_clr_sync (.clk(port_clk), .rst(port_rst), .d(clr_tog_u), .q(clr_tog_p));
+  hades_sram_sync2 u_clr_sync (.clk(port_clk), .rst(port_rst), .d(clr_tog_u), .q(clr_tog_p));
 
   always_ff @(posedge port_clk) begin
     if (port_rst) clr_tog_pd <= 1'b0;
@@ -667,9 +667,9 @@ module hades_sram_top
   end
 
   for (genvar i = 0; i < N; i++) begin : g_err_stky
-    hades_sync2 u_win_evt (.clk(ui_clk), .rst(ui_rst_soft),
+    hades_sram_sync2 u_win_evt (.clk(ui_clk), .rst(ui_rst_soft),
                            .d(win_tog_p[i]), .q(win_lvl_u[i]));
-    hades_sync2 u_ovf_evt (.clk(ui_clk), .rst(ui_rst_soft),
+    hades_sram_sync2 u_ovf_evt (.clk(ui_clk), .rst(ui_rst_soft),
                            .d(ovf_tog_p[i]), .q(ovf_lvl_u[i]));
     always_ff @(posedge ui_clk) begin
       if (ui_rst_soft) begin
@@ -685,7 +685,7 @@ module hades_sram_top
   // selftest error toggles: same toggle/sync2/edge-detect scheme; the pulses
   // feed the mig_if PORT_STAT_ERR counters (blanked by evt_en via st_evt_u)
   for (genvar i = 0; i < N; i++) begin : g_st_evt
-    hades_sync2 u_st_evt (.clk(ui_clk), .rst(ui_rst_soft),
+    hades_sram_sync2 u_st_evt (.clk(ui_clk), .rst(ui_rst_soft),
                           .d(st_tog_p[i]), .q(st_lvl_u[i]));
     always_ff @(posedge ui_clk) begin
       if (ui_rst_soft) st_dl_u[i] <= 1'b0;
@@ -696,7 +696,7 @@ module hades_sram_top
   // quasi-static views of the port_clk stickies for the ui_clk domain
   logic [N-1:0] win_stky_q, ovf_stky_q;
   for (genvar i = 0; i < N; i++) begin : g_stky_qs
-    hades_qs_bus #(.WIDTH(2), .DST_SYNC_STAGES(0)) u_stky_qs (
+    hades_sram_qs_bus #(.WIDTH(2), .DST_SYNC_STAGES(0)) u_stky_qs (
       .src_clk   (1'b0), .src_rst (1'b0),
       .src_data  ({win_stky[i], ovf_stky[i]}),
       .src_upd   (1'b1),
@@ -752,7 +752,7 @@ module hades_sram_top
   // Refresh/ZQCS scheduler (M3).  ui_rst_soft so SOFT_RESET also clears
   // STAT_REFCNT and re-gears maintenance to the new configuration (T12).
   // ------------------------------------------------------------------
-  hades_refresh_sched u_refresh_sched (
+  hades_sram_refresh_sched u_refresh_sched (
     .ui_clk         (ui_clk),
     .ui_rst         (ui_rst_soft),
     .calib_done     (calib_q),

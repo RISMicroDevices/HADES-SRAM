@@ -16,7 +16,7 @@
 #
 # The SLR-crossing robustness the pblock was meant to stress is instead
 # guaranteed by construction (M5-hw): every MIG-side input is registered at
-# the HADES boundary (calib/refresh acks) and inside hades_mig_if (R/B AXI
+# the HADES boundary (calib/refresh acks) and inside hades_sram_mig_if (R/B AXI
 # channels), and every HADES AXI output is a register — all SLR crossings
 # are FF->FF.  Cross-SLR timing is evidenced in
 # build/*/reports/timing_summary.rpt (WNS >= 0).  Integrators who need the

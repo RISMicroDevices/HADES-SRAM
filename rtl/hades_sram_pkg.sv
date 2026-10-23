@@ -5,7 +5,7 @@
 //-----------------------------------------------------------------------------
 `default_nettype none
 
-package hades_pkg;
+package hades_sram_pkg;
 
   // ------------------------------------------------------------------
   // Compile-time capacity
@@ -50,7 +50,7 @@ package hades_pkg;
   // pessimistic ui-cycle length of one maintenance AR-block on the real MIG
   // (single tRFC-class op; measured 61-127 on VCU1525 — longer events were
   // back-to-back pairs, which the deadline/debt mechanics split across
-  // periods) — the arbiter's maint_fire_ok deadline, see hades_arbiter
+  // periods) — the arbiter's maint_fire_ok deadline, see hades_sram_arbiter
   localparam int MAINT_BLOCK_EST     = 150;
 
   function automatic int cdc_ovhd(input clk_mode_e m);
@@ -72,7 +72,7 @@ package hades_pkg;
 
   // ------------------------------------------------------------------
   // Configuration struct — the single internal representation consumed
-  // by arbiter / ports / refresh.  Produced by hades_csr (CSR_EN=1) or by
+  // by arbiter / ports / refresh.  Produced by hades_sram_csr (CSR_EN=1) or by
   // static_cfg() from parameters (CSR_EN=0).
   // ------------------------------------------------------------------
   typedef struct packed {

@@ -10,7 +10,7 @@ set div [lindex $argv 0]; if {$div eq ""} { set div 600 }
 set bdir [lindex $argv 1]; if {$bdir eq ""} { set bdir "$here/../build/sync_lastmile" }
 
 hw_open
-set_property PROBES.FILE $bdir/hades_vcu1525_sync.ltx [current_hw_device]
+set_property PROBES.FILE $bdir/hades_sram_vcu1525_sync.ltx [current_hw_device]
 refresh_hw_device [current_hw_device]
 reset_hw_axi [hw_axi]
 

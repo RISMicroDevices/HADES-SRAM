@@ -2,11 +2,11 @@
 // HADES-SRAM — CDC whitelist (spec 4.1, ASYNC mode)
 // The ONLY legal cross-domain structures when CLK_MODE=ASYNC.  No bare
 // cross-domain wires anywhere else in the IP.
-//   (a) hades_sync2   — single-bit 2-flop synchronizer
-//   (b) hades_qs_bus  — quasi-static multi-bit bus + synchronized update flag
-//   (c) hades_rst_sync— async-assert / sync-deassert reset, one per domain
+//   (a) hades_sram_sync2   — single-bit 2-flop synchronizer
+//   (b) hades_sram_qs_bus  — quasi-static multi-bit bus + synchronized update flag
+//   (c) hades_sram_rst_sync— async-assert / sync-deassert reset, one per domain
 // All resets here are the destination-domain synchronous resets produced by
-// hades_rst_sync.  Under `SYNTHESIS` the simulation X-propagation aids
+// hades_sram_rst_sync.  Under `SYNTHESIS` the simulation X-propagation aids
 // vanish; T13a relies on them.
 //-----------------------------------------------------------------------------
 `default_nettype none
@@ -16,7 +16,7 @@
 // Requirement on the source: any pulse must be >= 1 dst period + 2 dst flops
 // worth of setup; used for req/ack handshakes and the period-tick detector.
 // ---------------------------------------------------------------------------
-module hades_sync2 (
+module hades_sram_sync2 (
   input  wire logic clk,   // destination clock
   input  wire logic rst,   // destination synchronous reset
   input  wire logic d,     // source-domain signal
@@ -56,7 +56,7 @@ endmodule
 //     at the L-th port edge, stable for >= 1.37 us by then).  src_upd is a
 //     LEVEL in this mode.  src_clk/src_rst/dst_clk/dst_rst are unused.
 // ---------------------------------------------------------------------------
-module hades_qs_bus #(
+module hades_sram_qs_bus #(
   parameter int WIDTH = 32,
   parameter int DST_SYNC_STAGES = 2
 ) (
@@ -83,7 +83,7 @@ module hades_qs_bus #(
       end
 
       logic tog_dst;
-      hades_sync2 u_upd_sync (
+      hades_sram_sync2 u_upd_sync (
         .clk (dst_clk),
         .rst (dst_rst),
         .d   (tog_src),
@@ -112,7 +112,7 @@ endmodule
 // One instance per clock domain; the active-high srst output is the
 // domain's synchronous reset.
 // ---------------------------------------------------------------------------
-module hades_rst_sync #(
+module hades_sram_rst_sync #(
   parameter bit ARST_ACTIVE_HIGH = 1'b0   // 0: arst_n input is active-low
 ) (
   input  wire logic clk,
@@ -132,13 +132,13 @@ endmodule
 
 // ---------------------------------------------------------------------------
 // Small asynchronous FIFO for request crossings (port_clk -> ui_clk).
-// Whitelist composition: per-bit hades_sync2 on Gray-coded pointers (spec 4.1
+// Whitelist composition: per-bit hades_sram_sync2 on Gray-coded pointers (spec 4.1
 // forbids direct sampling of *non-Gray* counters; Gray is the sanctioned
 // exception) + per-entry quasi-static data hold (entry written at push,
 // stable long before the read side observes it via the synchronized pointer).
 // Depth must be a power of two and >= 4.  Read data is combinational from mem.
 // ---------------------------------------------------------------------------
-module hades_afifo #(
+module hades_sram_afifo #(
   parameter int WIDTH = 32,
   parameter int DEPTH = 4
 ) (
@@ -204,8 +204,8 @@ module hades_afifo #(
 
   // -- pointer crossings (per-bit sync2; Gray => single-bit change per step) --
   for (genvar i = 0; i < PW; i++) begin : g_ptr_sync
-    hades_sync2 u_r2w (.clk(wclk), .rst(wrst), .d(rptr_g[i]),  .q(rptr_g_w[i]));
-    hades_sync2 u_w2r (.clk(rclk), .rst(rrst), .d(wptr_g[i]),  .q(wptr_g_r[i]));
+    hades_sram_sync2 u_r2w (.clk(wclk), .rst(wrst), .d(rptr_g[i]),  .q(rptr_g_w[i]));
+    hades_sram_sync2 u_w2r (.clk(rclk), .rst(rrst), .d(wptr_g[i]),  .q(wptr_g_r[i]));
   end
 endmodule
 

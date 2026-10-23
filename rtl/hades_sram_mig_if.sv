@@ -4,7 +4,7 @@
 // - Per-port read/write request FIFO heads arrive here (rd_vld/rd_addr ...,
 //   level-held until rd_gnt).  FCFS with fixed lowest-index priority; the
 //   TDMA slot gating of spec 3.2 is layered in front of this engine in M4
-//   (hades_arbiter) without changing the engine itself.
+//   (hades_sram_arbiter) without changing the engine itself.
 // - Reads: one 512-bit beat per access (DW <= 64), single AXI ID 0 so MIG
 //   returns strictly in issue order; a tracking FIFO carries {port, lane,
 //   timestamp, synthetic} for response routing and STAT_MAXLAT.
@@ -16,14 +16,14 @@
 // - Backdoor (M4): an extra lowest-priority requester on both engines
 //   (sel = 8'hFF marker), picked only when no port is eligible — i.e. in
 //   the maintenance window and idle slots.  Backdoor beats/lanes arrive
-//   pre-translated from hades_backdoor; read data returns on bkp_rd_*.
+//   pre-translated from hades_sram_backdoor; read data returns on bkp_rd_*.
 //   Backdoor traffic counts in stat_tot_* but not in per-port stats.
 // - Outstanding depth 32 (spec: >= 16).
 //-----------------------------------------------------------------------------
 `default_nettype none
 
-module hades_mig_if
-  import hades_pkg::*;
+module hades_sram_mig_if
+  import hades_sram_pkg::*;
 #(
   parameter int N  = N_MAX,
   parameter int DW = DW_DEFAULT,

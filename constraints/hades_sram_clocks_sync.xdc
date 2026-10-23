@@ -17,7 +17,7 @@
 # quasi-static response-slot crossings (ui_clk -> port_clk, STAGES=0 wires):
 # data is stable >= 1 target period before the shaper samples it; bound the
 # wire delay so the router keeps the crossing short.  Sources are the hold
-# registers inside each hades_port.
+# registers inside each hades_sram_port.
 set_max_delay -datapath_only 10.0 \
     -from [get_cells -hier -filter {NAME =~ */u_port/slot_data_u_reg*}] -quiet
 set_max_delay -datapath_only 10.0 \

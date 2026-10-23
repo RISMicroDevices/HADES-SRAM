@@ -8,7 +8,7 @@ HADES-SRAM emulates N (≤ 64, architecturally 128) independent synchronous-SRAM
 
 - Clock domains: `ui_clk` = 300 MHz (MIG user clock), `port_clk` = 100–500 KHz (emulated SRAM clock, shared by all ports in this revision)
 - `CLK_MODE=SYNC` (default): same-source clocks, phase declared in XDC — see §4
-- `CLK_MODE=ASYNC`: independent sources; whitelist CDC (`rtl/hades_cdc.sv`)
+- `CLK_MODE=ASYNC`: independent sources; whitelist CDC (`rtl/hades_sram_cdc.sv`)
 - `CSR_EN=1` (default): AXI4-Lite CSR (see `csr/csr_regmap.md`)
 - `CSR_EN=0`: static hard-wired configuration via parameters — see §5
 
@@ -39,7 +39,7 @@ Feasibility is enforced at elaboration (T11); N=128 @ 500 KHz is unreachable on 
 
 ### 3.1 Maintenance window and refresh gearing (M3)
 
-`hades_refresh_sched` owns `app_ref_req`/`app_zq_req` (User Refresh and ZQCS Input mode — in this mode the MIG never auto-refreshes; the IP is solely responsible for DRAM retention).
+`hades_sram_refresh_sched` owns `app_ref_req`/`app_zq_req` (User Refresh and ZQCS Input mode — in this mode the MIG never auto-refreshes; the IP is solely responsible for DRAM retention).
 
 - Period tick: `port_clk` is sampled through a 2FF synchronizer and rising-edge detected in the `ui_clk` domain (≤ 2-cycle jitter in ASYNC, absorbed by the slot margin). The maintenance window is the first `MAINT_SLOTS` (150) `ui_clk` cycles after each tick — the slot-table head; port service slots begin at 150 + `FIRST_LAT` + `CDC_OVHD`.
 - Refresh: a free-running `ui_clk` timer pends one debt every `CFG_REFRESH_DIV` cycles (default 2100 ≈ 7 µs). While enabled, debts are serviced only inside the maintenance window (zero maintenance jitter in the emulated domain), at most 2 per window — 100 KHz needs ≈ 1.43 refreshes per target period. A debt ≥ 4 (misconfiguration or clock stutter) overrides the window gate: a mid-period refresh beats losing DRAM contents. While DISABLED the window gate is open, so memory contents survive DISABLE→ENABLE reconfiguration. The timer never re-gears on service, so the long-run refresh rate is exactly 1/`CFG_REFRESH_DIV` (A6: `STAT_REFCNT` vs configured rate ±1%).
@@ -52,7 +52,7 @@ Feasibility is enforced at elaboration (T11); N=128 @ 500 KHz is unreachable on 
 ## 4. Dual clock domains [*M2+, M5-hw*]
 
 - SYNC (default): both clocks from one source. On the VCU1525 build `port_clk` is a fabric-divided square wave of `ui_clk` (`board_clk_gen` divider + BUFGCE), declared as a generated clock (worst gear divide_by 600 = 500 KHz); slower gears are strictly easier to close. No spread spectrum, no runtime phase drift; if that cannot be guaranteed, rebuild `CLK_MODE=ASYNC` (violation is an integration error; not detected at runtime)
-- ASYNC: CDC only via `hades_sync2` / `hades_qs_bus` / `hades_rst_sync` (ASYNC_REG marked); `report_cdc` zero violations is the build acceptance (A1). MTBF: 2-flop synchronizers at ≤ 300 MHz with 3.3 ns first-stage bound — failure interval ≫ mission time (see also T13d sim: zero output-propagating metastability in 1e5 random setup/hold violations)
+- ASYNC: CDC only via `hades_sram_sync2` / `hades_sram_qs_bus` / `hades_sram_rst_sync` (ASYNC_REG marked); `report_cdc` zero violations is the build acceptance (A1). MTBF: 2-flop synchronizers at ≤ 300 MHz with 3.3 ns first-stage bound — failure interval ≫ mission time (see also T13d sim: zero output-propagating metastability in 1e5 random setup/hold violations)
 - Board clock control (M5-hw): `board_ctrl` register block at JTAG-AXI `0x0001_0000`: `CLK_DIV` (src cycles per port period), `CLK_CTRL` (bit0 GATE stop/run, bit8 COMMIT apply-at-next-wrap). Divider reloads only take effect through a commit strobe at a counter wrap, so an A10-style sweep never tears a multi-bit divider mid-period — every `port_clk` period has an exact integer length and the frequency monitor never sees a phantom over/under-frequency. Gate-off holds `port_clk` low (BUFGCE), which freezes the port domain; the cycle-accurate contract is in `port_clk` cycles, so stop/start is transparent (T13b mechanism, re-proven on hardware as A10)
 - **ASYNC clock source on VCU1525 (deviation)**: all four onboard 300 MHz inputs share one crystal (SI53340 fanout buffer), so the ASYNC build's `port_clk` comes from a **second MMCM on `default_300mhz_clk1`** (100.00 MHz → divider 200/1000 for 500/100 KHz). This exercises the full ASYNC CDC logic but is *not* crystal-independent as spec A10b intends; the true-independence proof is T7/T13d simulation (incommensurate clocks, phase walk, ±0.5% drift). A PCIe-slot-refclk variant (`BOARD_CLKSRC_PCIE`) is prepared in the board RTL/XDC but its MGT refclk pin split is unverified (`fpga/vcu1525/pins_async_pcie.xdc` TODO)
 - `CFG_MIN_PERIOD` / `P_MIN_PERIOD`: frequency interlock in `ui_clk` cycles (default 600 = 500 KHz)
@@ -64,11 +64,11 @@ Feasibility is enforced at elaboration (T11); N=128 @ 500 KHz is unreachable on 
 
 ## 6. SLR / placement [*M5-hw*]
 
-VU9P = 3 SLRs. The MIG C0 controller+PHY is board-fixed in **SLR0** (C0 I/O banks). Intended methodology (spec DoD): pblock the HADES core into SLR2 so the ui_clk AXI4 paths cross the boundary once each way through registered interfaces — the worst integration scenario. **Toolchain finding (Vivado 2024.1): the MIG's built-in automatic pblock generation fails (Place 30-881/30-99) whenever a ranged user pblock exists in the design** — whole-SLR, CLOCKREGION, and sub-rectangle forms all reproduce it (see `fpga/vcu1525/pblock_slr2.xdc` for the full note and the integrator recipe). The production build therefore ships without a ranged pblock; SLR-crossing robustness is guaranteed by construction instead (M5-hw): every MIG-side input is registered at the HADES boundary (calib, refresh acks) and inside `hades_mig_if` (R/B AXI channels), every HADES AXI output is a register — all crossings are FF→FF. A1 evidence: `fpga/vcu1525/build/*/reports/timing_summary.rpt` (WNS ≥ 0) and, for the ASYNC build, `cdc.rpt` (zero violations).
+VU9P = 3 SLRs. The MIG C0 controller+PHY is board-fixed in **SLR0** (C0 I/O banks). Intended methodology (spec DoD): pblock the HADES core into SLR2 so the ui_clk AXI4 paths cross the boundary once each way through registered interfaces — the worst integration scenario. **Toolchain finding (Vivado 2024.1): the MIG's built-in automatic pblock generation fails (Place 30-881/30-99) whenever a ranged user pblock exists in the design** — whole-SLR, CLOCKREGION, and sub-rectangle forms all reproduce it (see `fpga/vcu1525/pblock_slr2.xdc` for the full note and the integrator recipe). The production build therefore ships without a ranged pblock; SLR-crossing robustness is guaranteed by construction instead (M5-hw): every MIG-side input is registered at the HADES boundary (calib, refresh acks) and inside `hades_sram_mig_if` (R/B AXI channels), every HADES AXI output is a register — all crossings are FF→FF. A1 evidence: `fpga/vcu1525/build/*/reports/timing_summary.rpt` (WNS ≥ 0) and, for the ASYNC build, `cdc.rpt` (zero violations).
 
 ## 7. Backdoor content load/readout
 
-CSR `BKP_*` registers (CSR_EN=1) or the `bkp_*` pins (CSR_EN=0) drive `hades_backdoor`, a lowest-priority requester on the backend engines: it is served only when no port is eligible — the maintenance window and idle slots — so it never disturbs the per-port latency contract (T9). It works while the IP is disabled, which is how the 64 images are loaded before ENABLE. Register semantics in `csr/csr_regmap.md`.
+CSR `BKP_*` registers (CSR_EN=1) or the `bkp_*` pins (CSR_EN=0) drive `hades_sram_backdoor`, a lowest-priority requester on the backend engines: it is served only when no port is eligible — the maintenance window and idle slots — so it never disturbs the per-port latency contract (T9). It works while the IP is disabled, which is how the 64 images are loaded before ENABLE. Register semantics in `csr/csr_regmap.md`.
 
 64 ports × 16 MiB full initialization: 64 × 2^18 beats ≈ 16.8 M AXI beats ≈ 56 ms of backend bus time at full rate; the backdoor is additionally throttled by arbitration (maintenance windows + idle slots), so budget ≈ 0.1–0.2 s of chip time at 500 KHz with no target traffic. **Caveat on the JTAG-AXI host path (M5-hw):** each backdoor word costs several JTAG-AXI register transactions, so host-side throughput is the bottleneck (~10³–10⁴ words/s) — full 1 GiB initialization via backdoor is impractical on this host path; A3 uses a sparse-but-dense PRBS sweep per port (see the A3 acceptance note in §9), while full-bandwidth traffic proof is delegated to the on-chip selftest engines (A4/A5). On a future PCIe/XDMA host path the full traversal is seconds. (Mechanism sim-verified in M4.)
 
@@ -92,7 +92,7 @@ CSR `BKP_*` registers (CSR_EN=1) or the `bkp_*` pins (CSR_EN=0) drive `hades_bac
 | Milestone | Content | Tests |
 |---|---|---|
 | M1 (done) | Skeleton: pkg/CDC/freq-mon/CSR, empty datapath, CSR_EN variants | T6-basic, static smoke, bounds |
-| M2 (done) | Full per-port datapath: hades_port (CDC: Gray-FIFO + quasi-static slots), timing shaper (L=1/2, back-to-back), mig_if (FCFS AXI4 engine, 32-deep outstanding, sub-word lanes, stats + illegal/SLVERR/drop errors), AXI4 MIG model with refresh/periodic-read/ZQCS occupancy | T1 (1e5 ops), T2 (L=1/2 exact), T13a-lite — SYNC+ASYNC, CSR+static, VCS+xsim |
+| M2 (done) | Full per-port datapath: hades_sram_port (CDC: Gray-FIFO + quasi-static slots), timing shaper (L=1/2, back-to-back), mig_if (FCFS AXI4 engine, 32-deep outstanding, sub-word lanes, stats + illegal/SLVERR/drop errors), AXI4 MIG model with refresh/periodic-read/ZQCS occupancy | T1 (1e5 ops), T2 (L=1/2 exact), T13a-lite — SYNC+ASYNC, CSR+static, VCS+xsim |
 | M3 (done) | Refresh/ZQCS scheduling (window-geared debt scheduler, period tick), determinism guards; model maintenance now request-driven (+MAINT_STRESS / +RD_LAT_ADD knobs) | T2(L=1), T3 (+stress), T11 (5 legs), T14 — SYNC+ASYNC, CSR+static, VCS+xsim |
 | M4 (done) | TDMA arbiter (static slot table, eligibility latches), backdoor (CSR + pins, lowest-priority requester), CFG_PORTS gear gating; T7 ASYNC phase walk + ±0.5% drift | T4 (64/32/16/8 + L=1), T5, T7 (100/500 KHz), T9, T11 — SYNC+ASYNC, CSR+static, VCS+xsim |
 | M5-sim (done) | error paths, backend-timeout backstop, config reload, full CDC campaign, long regression, VCS coverage gate; fixed the 16-bit latency-counter wrap (false timeouts at each 2^16-cycle wrap) | T8, T10 (1e6 cycles, VCS), T12, T13 full, coverage line ≥95% / FSM 100% |
@@ -127,9 +127,9 @@ Board bring-up log:
 
 ## 11. VCU1525 production build (M5-hw)
 
-`fpga/vcu1525/build.tcl` one-command build: `vivado -mode batch -source build.tcl -tclargs SYNC|ASYNC [PCIE|MMCM]` → `build/<tag>/hades_vcu1525_<tag>.bit` + `.ltx` + `reports/` (timing summary, utilization, DRC, and `cdc.rpt` for ASYNC). A1 gates scripted: WNS ≥ 0; ASYNC additionally `report_cdc` with zero **unwaived Critical/Warning** violations (reviewed, justified dispositions in `fpga/vcu1525/cdc_waivers.tcl`, sourced post-route pre-report; Info-severity findings are recognized ASYNC_REG synchronizers kept as evidence, never waived). `impl_from_synth.tcl` re-implements from the post-synth checkpoint for iteration.
+`fpga/vcu1525/build.tcl` one-command build: `vivado -mode batch -source build.tcl -tclargs SYNC|ASYNC [PCIE|MMCM]` → `build/<tag>/hades_sram_vcu1525_<tag>.bit` + `.ltx` + `reports/` (timing summary, utilization, DRC, and `cdc.rpt` for ASYNC). A1 gates scripted: WNS ≥ 0; ASYNC additionally `report_cdc` with zero **unwaived Critical/Warning** violations (reviewed, justified dispositions in `fpga/vcu1525/cdc_waivers.tcl`, sourced post-route pre-report; Info-severity findings are recognized ASYNC_REG synchronizers kept as evidence, never waived). `impl_from_synth.tcl` re-implements from the post-synth checkpoint for iteration.
 
-Architecture (`fpga/vcu1525/rtl/hades_board_top.sv`):
+Architecture (`fpga/vcu1525/rtl/hades_sram_board_top.sv`):
 
 ```
 CPU_RESETn ──invert──> MIG C0 (sys_rst)         DDR4 pins (board interface XDC)
@@ -143,7 +143,7 @@ LEDs: 0=calib_done, 1=ui_clk heartbeat ~4.5Hz, 2=sticky SLVERR
 ```
 
 - Host path: JTAG-AXI (`xilinx.com:ip:jtag_axi` in AXI4-Lite mode, single-outstanding) at `ui_clk`; `board_axil_xbar` 1→2 decode on address bit 16. Host scripts in `fpga/vcu1525/host/` (`vivado -mode batch -source host/<script>.tcl`, hw_server at `localhost:3121`).
-- IP packager: `ip/package_ip.tcl` → `ip/hades_sram_1.0/` (catalog-verified + OOC synth of the packaged sources). Ships `constraints/hades_clocks_{sync,async}.xdc` (sync auto-loads; async swap documented) and `csr/csr_regmap.md`.
+- IP packager: `ip/package_ip.tcl` → `ip/hades_sram_1.0/` (catalog-verified + OOC synth of the packaged sources). Ships `constraints/hades_sram_clocks_{sync,async}.xdc` (sync auto-loads; async swap documented) and `csr/csr_regmap.md`.
 - RTL style notes for the packager (do not regress): top-level ports use `input wire` (no compound `wire logic`); parameter defaults and port widths are plain literals, no package constants or constant-function calls (the packager's XPath parser rejects both).
 - Debug probe nets for the port-domain ILA are marked via `fpga/vcu1525/debug_probes.xdc` (XDC files do **not** support `foreach` — marks are unrolled); the ILA core itself is created post-synthesis (probe1+ need `create_debug_port`; multi-probe ILA needs `ALL_PROBE_SAME_MU_CNT ≥ 2`).
 - Vivado 2024.1 jtag_axi `PROTOCOL=2` = AXI4LITE (not 1). axi_interconnect is not parameterizable outside block designs in 2024.1 — hence the RTL crossbar.

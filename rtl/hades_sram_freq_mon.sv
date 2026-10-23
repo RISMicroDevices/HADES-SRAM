@@ -14,9 +14,9 @@
 //-----------------------------------------------------------------------------
 `default_nettype none
 
-module hades_freq_mon #(
+module hades_sram_freq_mon #(
   // 1: port_clk is phase-related to ui_clk (SYNC) — sample directly.
-  // 0: independent source (ASYNC) — enter via hades_sync2.
+  // 0: independent source (ASYNC) — enter via hades_sram_sync2.
   parameter bit CLK_MODE_SYNC = 1'b1,
   // No rising edge for this many ui_clk cycles => clock declared stopped.
   // 16384 cycles ~ 54.6 us @ 300 MHz, comfortably above the longest legal
@@ -44,7 +44,7 @@ module hades_freq_mon #(
         else        pc_s <= port_clk;
       end
     end else begin : g_sync
-      hades_sync2 u_pc_sync (
+      hades_sram_sync2 u_pc_sync (
         .clk (ui_clk),
         .rst (ui_rst),
         .d   (port_clk),

@@ -1,5 +1,5 @@
 # M5-hw: probe — generate the production MIG config in a scratch project and
-# dump the resulting port list (stub), so hades_board_top.sv can be written
+# dump the resulting port list (stub), so hades_sram_board_top.sv can be written
 # against exact names.  Not part of the build; run once by hand.
 set proj_dir [file normalize ./work_mig_probe]
 create_project -force -part xcvu9p-fsgd2104-2L-e probe $proj_dir

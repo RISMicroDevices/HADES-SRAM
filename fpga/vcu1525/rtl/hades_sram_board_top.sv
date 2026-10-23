@@ -13,13 +13,13 @@
 //
 // Reset: MIG sys_rst is ACTIVE_HIGH but the CPU_RESET button idles HIGH
 // (active-low press) — wire it inverted (spike lesson).  ui_rst for the
-// fabric logic is the MIG's ui_clk_sync_rst; hades_rst_sync re-syncs it into
+// fabric logic is the MIG's ui_clk_sync_rst; hades_sram_rst_sync re-syncs it into
 // each domain internally.
 //-----------------------------------------------------------------------------
 `timescale 1ns/1ps
 `default_nettype none
 
-module hades_board_top #(
+module hades_sram_board_top #(
   parameter bit SYNC_MODE = 1'b1    // 1: SYNC build, 0: ASYNC build
 ) (
   input  wire logic        cpu_resetn,       // AL20 push button, active low

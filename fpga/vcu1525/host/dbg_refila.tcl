@@ -4,7 +4,7 @@ source $here/common.tcl
 source $here/ila_common.tcl
 
 hw_open
-set_property PROBES.FILE $here/../build/sync/hades_vcu1525_sync.ltx [current_hw_device]
+set_property PROBES.FILE $here/../build/sync/hades_sram_vcu1525_sync.ltx [current_hw_device]
 refresh_hw_device [current_hw_device]
 reset_hw_axi [hw_axi]
 

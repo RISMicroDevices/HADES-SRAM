@@ -1,6 +1,6 @@
 //-----------------------------------------------------------------------------
 // HADES-SRAM — TDMA slot arbiter (spec 3.2).  ui_clk domain; sits between the
-// per-port request FIFO heads and hades_mig_if, which it leaves unchanged: it
+// per-port request FIFO heads and hades_sram_mig_if, which it leaves unchanged: it
 // only gates rd_vld/wr_vld with per-port eligibility latches.
 //
 // Slot table (spec 4.3, elaboration-static): port i becomes eligible at
@@ -21,8 +21,8 @@
 //-----------------------------------------------------------------------------
 `default_nettype none
 
-module hades_arbiter
-  import hades_pkg::*;
+module hades_sram_arbiter
+  import hades_sram_pkg::*;
 #(
   parameter int N       = N_MAX,
   parameter bit IS_SYNC = 1'b1

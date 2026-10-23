@@ -32,10 +32,10 @@ module board_clk_gen (
   logic        commit_sync;
   logic        gate_sync;
   logic [15:0] div_s;
-  hades_sync2 u_commit (.clk(src_clk), .rst(src_rst), .d(div_commit), .q(commit_sync));
-  hades_sync2 u_gate   (.clk(src_clk), .rst(src_rst), .d(gate),       .q(gate_sync));
+  hades_sram_sync2 u_commit (.clk(src_clk), .rst(src_rst), .d(div_commit), .q(commit_sync));
+  hades_sram_sync2 u_gate   (.clk(src_clk), .rst(src_rst), .d(gate),       .q(gate_sync));
   for (genvar b = 0; b < 16; b++) begin : g_div_sync
-    hades_sync2 u_div (.clk(src_clk), .rst(src_rst), .d(div[b]), .q(div_s[b]));
+    hades_sram_sync2 u_div (.clk(src_clk), .rst(src_rst), .d(div[b]), .q(div_s[b]));
   end
 
   logic [15:0] cnt;

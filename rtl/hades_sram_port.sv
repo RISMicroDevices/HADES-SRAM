@@ -1,11 +1,11 @@
 //-----------------------------------------------------------------------------
 // HADES-SRAM — one emulated SRAM port (spec 3.1), containing its whole
-// cross-domain structure (spec 3.1: internal to hades_port, transparent to
+// cross-domain structure (spec 3.1: internal to hades_sram_port, transparent to
 // the integrator):
 //
 //   port_clk domain                          ui_clk domain
 //   --------------                           -------------
-//   request capture -> hades_afifo (Gray ptrs + quasi-static entries) -->
+//   request capture -> hades_sram_afifo (Gray ptrs + quasi-static entries) -->
 //   timing shaper  <-- 2 response hold slots (quasi-static, qs_bus S=0) ---
 //
 // The same structure serves SYNC and ASYNC: in SYNC the crossings are plain
@@ -18,13 +18,13 @@
 //-----------------------------------------------------------------------------
 `default_nettype none
 
-module hades_port
-  import hades_pkg::*;
+module hades_sram_port
+  import hades_sram_pkg::*;
 #(
   parameter int AW      = AW_DEFAULT,
   parameter int DW      = DW_DEFAULT,
   parameter bit IS_SYNC = 1'b1,
-  // M5-hw on-chip self-test (spec 6.2): 0 = absent (default), 1 = hades_selftest
+  // M5-hw on-chip self-test (spec 6.2): 0 = absent (default), 1 = hades_sram_selftest
   // engine instantiated; it drives the request inputs while st_run is active
   parameter bit SELFTEST_EN  = 1'b0,
   parameter int PORT_ID      = 0,     // PRBS seed discriminator
@@ -119,7 +119,7 @@ module hades_port
   // =========================================================================
   // Read request FIFO (port_clk -> ui_clk), depth 8
   // =========================================================================
-  hades_afifo #(.WIDTH(AW), .DEPTH(8)) u_rd_fifo (
+  hades_sram_afifo #(.WIDTH(AW), .DEPTH(8)) u_rd_fifo (
     .wclk   (port_clk),
     .wrst   (port_rst),
     .wpush  (rd_req_p),
@@ -136,7 +136,7 @@ module hades_port
   // =========================================================================
   // Write request FIFO (port_clk -> ui_clk), depth 8 (spec minimum 2)
   // =========================================================================
-  hades_afifo #(.WIDTH(AW+DW), .DEPTH(8)) u_wr_fifo (
+  hades_sram_afifo #(.WIDTH(AW+DW), .DEPTH(8)) u_wr_fifo (
     .wclk   (port_clk),
     .wrst   (port_rst),
     .wpush  (wr_req_p),
@@ -222,7 +222,7 @@ module hades_port
 
   // quasi-static view for the shaper (stable microseconds before sampling)
   for (genvar s = 0; s < 4; s++) begin : g_slot_qs
-    hades_qs_bus #(.WIDTH(DW+1), .DST_SYNC_STAGES(0)) u_slot_qs (
+    hades_sram_qs_bus #(.WIDTH(DW+1), .DST_SYNC_STAGES(0)) u_slot_qs (
       .src_clk   (1'b0), .src_rst (1'b0),
       .src_data  ({slot_vld_u[s], slot_data_u[s]}),
       .src_upd   (1'b1),
@@ -235,7 +235,7 @@ module hades_port
   // =========================================================================
   // Timing shaper (port_clk domain; spec 4.2)
   // =========================================================================
-  hades_timing_shaper #(.DW(DW)) u_shaper (
+  hades_sram_timing_shaper #(.DW(DW)) u_shaper (
     .port_clk   (port_clk),
     .port_rst   (port_rst),
     .rd_req     (rd_req_p),
@@ -267,8 +267,8 @@ module hades_port
     end
   end
 
-  hades_sync2 u_rel_sync (.clk(ui_clk), .rst(ui_rst), .d(rel_tog_p), .q(rel_lvl_u));
-  hades_qs_bus #(.WIDTH(2), .DST_SYNC_STAGES(0)) u_rel_slot_qs (
+  hades_sram_sync2 u_rel_sync (.clk(ui_clk), .rst(ui_rst), .d(rel_tog_p), .q(rel_lvl_u));
+  hades_sram_qs_bus #(.WIDTH(2), .DST_SYNC_STAGES(0)) u_rel_slot_qs (
     .src_clk   (1'b0), .src_rst (1'b0),
     .src_data  (rel_slot_p),
     .src_upd   (1'b1),
@@ -293,7 +293,7 @@ module hades_port
   // toggle ties off — zero functional and timing difference.
   // =========================================================================
   if (SELFTEST_EN) begin : g_selftest
-    hades_selftest #(
+    hades_sram_selftest #(
       .AW      (AW),
       .DW      (DW),
       .PORT_ID (PORT_ID),

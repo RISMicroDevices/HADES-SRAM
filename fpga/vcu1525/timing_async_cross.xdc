@@ -4,7 +4,7 @@
 #
 # ui_clk tree (from the MIG XDC) vs the async-source tree (which already
 # includes hades_port_clk through the divider's generated clock).  Only the
-# whitelist CDC cells of rtl/hades_cdc.sv cross: cut the domains, then bound
+# whitelist CDC cells of rtl/hades_sram_cdc.sv cross: cut the domains, then bound
 # the sync2 first stages and the quasi-static crossings.
 # =============================================================================
 

@@ -3,7 +3,7 @@
 #
 # port_clk comes from an independent source (second MMCM on the other onboard
 # oscillator input in the default build; PCIe slot refclk variant prepared).
-# Only the whitelist CDC cells in rtl/hades_cdc.sv cross the domains.
+# Only the whitelist CDC cells in rtl/hades_sram_cdc.sv cross the domains.
 #
 # The domain-crossing constraints live in timing_async_cross.xdc and are read
 # POST-PLACE: a user timing/path constraint referencing clocks in the

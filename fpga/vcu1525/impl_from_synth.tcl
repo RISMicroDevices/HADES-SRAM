@@ -55,7 +55,7 @@ phys_opt_design
 if {$is_sync} { read_xdc $here/timing_multicycle.xdc } \
 else          { read_xdc $here/timing_async_cross.xdc }
 route_design -directive AggressiveExplore
-write_debug_probes -force $bdir/hades_vcu1525_${tag}.ltx
+write_debug_probes -force $bdir/hades_sram_vcu1525_${tag}.ltx
 
 file mkdir $bdir/reports
 report_timing_summary -file $bdir/reports/timing_summary.rpt
@@ -65,7 +65,7 @@ if {!$is_sync} {
   report_cdc -details -file $bdir/reports/cdc.rpt
 }
 
-write_bitstream -force $bdir/hades_vcu1525_${tag}.bit
+write_bitstream -force $bdir/hades_sram_vcu1525_${tag}.bit
 
 # ---------------------------------------------------------------- A1 gate --
 set wns [get_property SLACK [get_timing_paths -max_paths 1 -nworst 1 -setup]]
@@ -78,5 +78,5 @@ if {!$is_sync} {
   if {$cdc_viol != 0} { puts "HADES-BUILD FAIL: report_cdc violations"; exit 1 }
 }
 
-puts "HADES-BUILD PASS: $bdir/hades_vcu1525_${tag}.bit"
+puts "HADES-BUILD PASS: $bdir/hades_sram_vcu1525_${tag}.bit"
 exit 0

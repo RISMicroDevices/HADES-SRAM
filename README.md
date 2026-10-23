@@ -1,6 +1,6 @@
 # HADES-SRAM
 
-**H**igh-density **A**XI4-**D**DR4-backed **E**mulated **SRAM** — an FPGA IP core that emulates many (up to 64, architecturally 128) independent, deterministic-latency SRAM ports on a **single AMD/Xilinx MIG DDR4 channel** (VCU1525, C0).
+**H**ybrid **A**ccelerated and **D**istributed **E**mulation **S**ystem — **HADES-SRAM** is the SRAM-emulation sub-project of HADES: an FPGA IP core that emulates many (up to 64, architecturally 128) independent, deterministic-latency SRAM ports on a **single AMD/Xilinx MIG DDR4 channel** (VCU1525, C0).
 
 - Target board: **VCU1525** (XCVU9P, DDR4-2400, `ui_clk` = 300 MHz)
 - Emulated SRAM ports: `port_clk` = 100–500 KHz, read latency L ∈ {1, 2} `port_clk` cycles (exact, not statistical), posted writes
@@ -12,7 +12,7 @@
 
 ```
 rtl/            synthesizable SystemVerilog-2012 (hades_sram_top + submodules)
-constraints/    hades_clocks_{sync,async}.xdc (per-CLK_MODE, shipped with the IP)
+constraints/    hades_sram_clocks_{sync,async}.xdc (per-CLK_MODE, shipped with the IP)
 csr/            csr_regmap.md (+ SystemRDL source, later milestone)
 sim/            VCS/xsim testbench: SV harness + DPI-C C++ (stimulus, scoreboard)
 fpga/vcu1525/   build.tcl (SYNC+ASYNC), board top RTL, JTAG-AXI host scripts, spike/

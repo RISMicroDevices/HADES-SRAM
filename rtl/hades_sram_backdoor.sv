@@ -3,7 +3,7 @@
 // initialize/verify the emulated SRAM contents without the target ports:
 // a command (port, word address, optional wdata) is translated exactly like
 // a port access (beat = port_base[port] + addr/lanes-per-beat, lane from the
-// low address bits) and handed to hades_mig_if as the lowest-priority
+// low address bits) and handed to hades_sram_mig_if as the lowest-priority
 // requester — it runs in the maintenance window and idle slots only, so
 // in-flight target traffic is never delayed beyond the slot budget (T9).
 //
@@ -14,8 +14,8 @@
 //-----------------------------------------------------------------------------
 `default_nettype none
 
-module hades_backdoor
-  import hades_pkg::*;
+module hades_sram_backdoor
+  import hades_sram_pkg::*;
 #(
   parameter int DW = DW_DEFAULT,
   parameter int AW = AW_DEFAULT

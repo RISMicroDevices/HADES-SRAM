@@ -6,7 +6,7 @@
 # Produces ip/hades_sram_1.0/ — a catalog-recognizable IP (vendor hades,
 # default CLK_MODE=SYNC), bundling:
 #   - rtl/*.sv (product RTL only; board/fpga files are NOT part of the IP)
-#   - constraints/hades_clocks_{sync,async}.xdc (per-CLK_MODE auto-loading)
+#   - constraints/hades_sram_clocks_{sync,async}.xdc (per-CLK_MODE auto-loading)
 #   - csr/csr_regmap.md (indexed-window semantics documentation)
 # Verification: the script re-packages and checks the core, then packages a
 # second copy with IS_SYNC=0 to prove the ASYNC constraint attach works.
@@ -36,7 +36,7 @@ ipx::package_project -root_dir $outdir -vendor hades.com -library hades \
 
 set core [ipx::current_core]
 set_property display_name "HADES-SRAM v1.0" $core
-set_property description "High-density AXI4-DDR4-backed emulated SRAM (up to 64 deterministic-latency ports on one MIG DDR4 channel)" $core
+set_property description "HADES (Hybrid Accelerated and Distributed Emulation System) SRAM sub-project: up to 64 deterministic-latency emulated-SRAM ports on one MIG DDR4 channel" $core
 set_property company_url {} $core
 set_property supported_families {virtexuplus Production} $core
 
@@ -53,8 +53,8 @@ set_property display_name "CLK_MODE (1=SYNC, 0=ASYNC)" $disp
 # and docs/integration_guide.md) — the 2024.1 packager API has no
 # parameter-conditional file enablement, so the swap is a documented step.
 file mkdir $outdir/doc
-file copy -force $root/constraints/hades_clocks_sync.xdc  $outdir/doc/
-file copy -force $root/constraints/hades_clocks_async.xdc $outdir/doc/
+file copy -force $root/constraints/hades_sram_clocks_sync.xdc  $outdir/doc/
+file copy -force $root/constraints/hades_sram_clocks_async.xdc $outdir/doc/
 file copy -force $root/csr/csr_regmap.md                  $outdir/doc/
 
 set synth_grp ""
@@ -62,12 +62,12 @@ foreach g [ipx::get_file_groups -of_objects $core] {
   if {[get_property type $g] eq "synthesis"} { set synth_grp $g; break }
 }
 if {$synth_grp eq ""} { set synth_grp [lindex [ipx::get_file_groups -of_objects $core] 0] }
-ipx::add_file $outdir/doc/hades_clocks_sync.xdc $synth_grp
+ipx::add_file $outdir/doc/hades_sram_clocks_sync.xdc $synth_grp
 
 # ---- CSR documentation (indexed-window semantics) + ASYNC constraint file
 set f_doc_grp [ipx::add_file_group -type documentation hades_doc $core]
 ipx::add_file $outdir/doc/csr_regmap.md $f_doc_grp
-ipx::add_file $outdir/doc/hades_clocks_async.xdc $f_doc_grp
+ipx::add_file $outdir/doc/hades_sram_clocks_async.xdc $f_doc_grp
 
 # ---- AXI4-Lite memory map (auto-inferred from s_axil_* ports): give the
 # register window a 64 KiB range

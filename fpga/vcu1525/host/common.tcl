@@ -90,7 +90,7 @@ proc hw_open {{url ""}} {
   # with generic names and ila_find's CELL_NAME match fails (2026-10-22: the
   # mapping had been served by a lingering program-session cs_server cache)
   if {[info exists ::env(HADES_LTX)]} { set ltx $::env(HADES_LTX) } \
-  else { set ltx [file join $::HADES_HOST_DIR .. build sync hades_vcu1525_sync.ltx] }
+  else { set ltx [file join $::HADES_HOST_DIR .. build sync hades_sram_vcu1525_sync.ltx] }
   if {[file exists $ltx]} {
     catch {set_property PROBES.FILE [file normalize $ltx] [current_hw_device]}
   }

@@ -1,12 +1,12 @@
 //-----------------------------------------------------------------------------
 // HADES-SRAM — on-chip self-test engine (spec 6.2), one per emulated port,
-// present only when hades_port is built with SELFTEST_EN=1.  Pure port_clk
+// present only when hades_sram_port is built with SELFTEST_EN=1.  Pure port_clk
 // domain.  Acceptance aid for the VCU1525 builds: the host cannot observe 64
 // ports at pin bandwidth, so each port generates and checks its own traffic
 // and reports errors into PORT_STAT_ERR (toggle -> ui_clk edge detect ->
-// hades_mig_if per-port error counter).
+// hades_sram_mig_if per-port error counter).
 //
-// While running, the engine drives the port's request inputs (hades_port
+// While running, the engine drives the port's request inputs (hades_sram_port
 // muxes them over the integrator pins) in an endless loop of
 //   WR:    BLK writes,  word i <- pat(i, pass)
 //   RD:    BLK reads of the same words
@@ -31,7 +31,7 @@
 //-----------------------------------------------------------------------------
 `default_nettype none
 
-module hades_selftest #(
+module hades_sram_selftest #(
   parameter int AW      = 22,
   parameter int DW      = 32,
   parameter int PORT_ID = 0,
@@ -82,7 +82,7 @@ module hades_selftest #(
   logic          exp_rvalid;
   logic [DW-1:0] exp_data;
 
-  hades_sync2 u_run_sync (.clk(port_clk), .rst(port_rst), .d(run), .q(run_p));
+  hades_sram_sync2 u_run_sync (.clk(port_clk), .rst(port_rst), .d(run), .q(run_p));
 
   // word pattern: xorshift32 mix of address, pass and port index
   function automatic logic [DW-1:0] st_pat(input logic [AW-1:0] a,
