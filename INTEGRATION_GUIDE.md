@@ -25,7 +25,7 @@ Key properties:
 | `rtl/` | Synthesizable SystemVerilog-2012 (`hades_sram_top` + submodules) |
 | `constraints/` | `hades_sram_clocks_{sync,async}.xdc` — per-clock-mode timing constraints shipped with the IP |
 | `csr/csr_regmap.md` | Full CSR register map (CSR_EN=1) and static-variant parameter list |
-| `ip/` | `package_ip.tcl` — Vivado IP packager flow (catalog-ready `hades_sram_1.0`) |
+| `ip/` | `package_ip.tcl` — Vivado IP packager flow (catalog-ready `hades_sram_1.0`); `open_ip_gui.tcl` — open the IP configurator in the Vivado GUI (empty scratch project) |
 | `fpga/vcu1525/` | VCU1525 reference build (bitstream flow + host scripts) |
 | `sim/` | SystemVerilog + DPI-C testbench (VCS and Vivado xsim) |
 

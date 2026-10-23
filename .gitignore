@@ -39,6 +39,7 @@ fpga/vcu1525/build/
 fpga/vcu1525/work_*/
 ip/work_pkg/
 ip/work_verify/
+ip/work_gui/
 ip/hades_sram_1.0/
 *.csv
 # --- Misc ---

@@ -16,6 +16,7 @@
 - `vivado -mode batch -source fpga/vcu1525/build.tcl -tclargs SYNC|ASYNC [PCIE|MMCM]` — VCU1525 bitstream (A1)
 - `vivado -mode batch -source fpga/vcu1525/host/<script>.tcl -tclargs ...` — board acceptance scripts (A2–A10): a2_init, a4_latency, a5_soak, a6_refresh, a7_dualfreq, a8_config, a9_soak, a10_clock (args in each file header). ASYNC-bitstream legs need env `HADES_SRC_UI_RATIO=3` (MMCM src; the freq monitor counts ui_clk cycles, the divider counts src_clk cycles) and `HADES_LTX=<build/async_MMCM/...ltx>`
 - `vivado -mode batch -source ip/package_ip.tcl` — package the Vivado IP (catalog-verified)
+- `vivado -source ip/open_ip_gui.tcl` — open the hades_sram IP configurator in the Vivado GUI (scratch project `ip/work_gui/`)
 
 ## Design rules (spec §4, do not violate)
 - Two clock domains: `ui_clk` (300 MHz) and `port_clk` (100–500 KHz); `CLK_MODE ∈ {SYNC(default), ASYNC}`
