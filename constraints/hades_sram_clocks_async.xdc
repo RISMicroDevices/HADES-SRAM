@@ -24,6 +24,6 @@ set_max_delay -datapath_only 3.3 \
 # quasi-static crossings (qs_bus STAGES=0 hold slots; qs data/valid lines):
 # protocol-guaranteed stable around sampling; bound the wire delay
 set_max_delay -datapath_only 10.0 \
-    -from [get_cells -hier -filter {NAME =~ */u_port/slot_data_u_reg*}] -quiet
+    -from [get_cells -hier -filter {NAME =~ *slot_data_u_reg*}] -quiet
 set_max_delay -datapath_only 10.0 \
-    -from [get_cells -hier -filter {NAME =~ */u_port/slot_vld_u_reg*}] -quiet
+    -from [get_cells -hier -filter {NAME =~ *slot_vld_u_reg*}] -quiet
