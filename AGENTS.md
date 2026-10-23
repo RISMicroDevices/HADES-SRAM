@@ -1,7 +1,7 @@
 # AGENTS.md — working agreements for HADES-SRAM
 
 ## Source of truth
-`/mnt/c/OneDrive/Kimi/HADES-SRAM_PlanMode.md` (spec; DoD = its §7). Deviations are listed in the plan and in `docs/integration_guide.md`.
+`/mnt/c/OneDrive/Kimi/HADES-SRAM_PlanMode.md` (spec; DoD = its §7). Deviations are listed in the plan and in `INTEGRATION_GUIDE.md` (working history in `docs/`).
 
 ## Toolchain (this host, WSL2)
 - VCS: `/home/kumon/Synopsys/vcs/X-2025.06/bin/vcs` (license `LM_LICENSE_FILE=27080@KUMON-S1-HALO` — usually already in env; WSL2 kernel warning is benign)

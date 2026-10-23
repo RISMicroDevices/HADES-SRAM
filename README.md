@@ -6,7 +6,7 @@
 - Emulated SRAM ports: `port_clk` = 100–500 KHz, read latency L ∈ {1, 2} `port_clk` cycles (exact, not statistical), posted writes
 - Clock modes: `CLK_MODE=SYNC` (default, same-source clocks) / `CLK_MODE=ASYNC` (independent clocks, whitelist CDC)
 - Config variants: `CSR_EN=1` (default, AXI4-Lite CSR; reached via JTAG-AXI on the VCU1525 build) / `CSR_EN=0` (static hard-wired, all config from parameters incl. per-port base/size)
-- Full spec: `HADES-SRAM_PlanMode.md` (project source of truth); register map: `csr/csr_regmap.md`; integration: `docs/integration_guide.md`
+- Full spec: `HADES-SRAM_PlanMode.md` (project source of truth); register map: `csr/csr_regmap.md`; integration: `INTEGRATION_GUIDE.md`
 
 ## Repository layout
 
@@ -18,7 +18,8 @@ sim/            VCS/xsim testbench: SV harness + DPI-C C++ (stimulus, scoreboard
 fpga/vcu1525/   build.tcl (SYNC+ASYNC), board top RTL, JTAG-AXI host scripts, spike/
 sw/             (host control = fpga/vcu1525/host/*.tcl via JTAG-AXI; no PCIe driver)
 ip/             package_ip.tcl (Vivado IP packager; catalog-verified)
-docs/           integration_guide.md, pipelining_study.md
+INTEGRATION_GUIDE.md  integration guide (consumer-facing)
+docs/           integration_guide.md, pipelining_study.md (working records)
 ```
 
 ## Quick start
