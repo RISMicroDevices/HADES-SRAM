@@ -31,7 +31,7 @@ set_property top hades_sram_top [current_fileset]
 # (per-CLK_MODE file groups + doc group, see below)
 
 # ---------------------------------------------------------------- package --
-ipx::package_project -root_dir $outdir -vendor hades.com -library hades \
+ipx::package_project -root_dir $outdir -vendor rismd.cn -library hades \
   -taxonomy /HADES -name hades_sram -import_files -force
 
 set core [ipx::current_core]
@@ -98,7 +98,7 @@ update_ip_catalog
 set defs [get_ipdefs -filter {NAME =~ *hades_sram*}]
 if {![llength $defs]} { puts "HADES-IP FAIL: core not in catalog"; exit 1 }
 puts "HADES-IP: catalog sees $defs"
-create_ip -name hades_sram -vendor hades.com -library hades -module_name hades_ip_inst
+create_ip -name hades_sram -vendor rismd.cn -library hades -module_name hades_ip_inst
 generate_target all [get_ips hades_ip_inst]
 synth_ip [get_ips hades_ip_inst]
 puts "HADES-IP PASS: packaged at $outdir (catalog + OOC synth verified)"
