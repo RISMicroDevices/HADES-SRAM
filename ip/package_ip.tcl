@@ -35,6 +35,23 @@ ipx::package_project -root_dir $outdir -vendor rismd.cn -library hades \
   -taxonomy /HADES -name hades_sram -import_files -force
 
 set core [ipx::current_core]
+
+# interface associations: the packager infers the bus interfaces but leaves
+# them unassociated (19-3158/19-5661/19-11770) — the GUI customization scope
+# fails to build its AXI slave model (rdi::create_slave) without these
+foreach {ifc pname pval} {
+  ui_clk   FREQ_HZ          300000000
+  ui_clk   ASSOCIATED_BUSIF m_axi:s_axil
+  port_clk FREQ_HZ          500000
+  m_axi    ASSOCIATED_CLOCK ui_clk
+  s_axil   ASSOCIATED_CLOCK ui_clk
+} {
+  set b [ipx::get_bus_interfaces $ifc -of_objects $core]
+  set p [ipx::get_bus_parameters -quiet $pname -of_objects $b]
+  if {![llength $p]} { set p [ipx::add_bus_parameter $pname $b] }
+  set_property value $pval $p
+}
+
 set_property display_name "HADES-SRAM v1.0" $core
 set_property description "HADES (Hybrid Accelerated and Distributed Emulation System) SRAM sub-project: up to 64 deterministic-latency emulated-SRAM ports on one MIG DDR4 channel" $core
 set_property company_url {} $core
@@ -50,7 +67,7 @@ set_property display_name "CLK_MODE (1=SYNC, 0=ASYNC)" $disp
 # SYNC file sits in the synthesis group (auto-loaded; CLK_MODE=SYNC is the
 # default).  The ASYNC file ships in the documentation group: an integrator
 # building with IS_SYNC=0 swaps it in for the SYNC one (see the file headers
-# and docs/integration_guide.md) — the 2024.1 packager API has no
+# and INTEGRATION_GUIDE.md) — the 2024.1 packager API has no
 # parameter-conditional file enablement, so the swap is a documented step.
 file mkdir $outdir/doc
 file copy -force $root/constraints/hades_sram_clocks_sync.xdc  $outdir/doc/
