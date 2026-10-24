@@ -3,6 +3,13 @@
 ## Source of truth
 `/mnt/c/OneDrive/Kimi/HADES-SRAM_PlanMode.md` (spec; DoD = its §7). Deviations are listed in the plan and in `INTEGRATION_GUIDE.md` (working history in `docs/`).
 
+## Current interface baseline (v1.1.0)
+- `N` defaults to 1 and supports 1–64 separated `sram<i>` interfaces; no packed SRAM port arrays.
+- Each port has an independent `W<i>` parameter (any integer 1–512, including non-powers of two) and `BE<i>_EN` switch. These are elaboration-time settings, not runtime CSR settings.
+- `PORT_SIZE` and backdoor addresses use 32-bit lane units. Use the lane-group formulas in `INTEGRATION_GUIDE.md` for other frontend widths.
+- Core `ID` = `0xADE50110`; VCU1525 `BOARD_ID` = `0xB0AD0110`. Catalog VLNV = `rismd.cn:hades:hades_sram:1.1`; vendor = `rismd.cn`.
+- `ip/hades_sram_1.0/` is generated output, not maintained source. XGUI source is `ip/xgui/hades_sram_v1_1.tcl`.
+
 ## Toolchain (this host, WSL2)
 - VCS: `/home/kumon/Synopsys/vcs/X-2025.06/bin/vcs` (license `LM_LICENSE_FILE=27080@KUMON-S1-HALO` — usually already in env; WSL2 kernel warning is benign)
 - Vivado 2024.1: `/home/kumon/Xilinx/Vivado/2024.1/bin` (`xvlog/xelab/xsim`); VCU1525 board files present (part `xcvu9p-fsgd2104-2L-e`); Windows side also has Vivado 2024.1 (`C:\Xilinx\Vivado\2024.1`) used for hw_server/JTAG
@@ -24,7 +31,9 @@
 - `CSR_EN ∈ {1(default), 0}`: CSR-configurable vs static hard-wired (params `P_*`, incl. flat per-port `P_PORT_BASE`/`P_PORT_SIZE` vectors); both produce the same internal `cfg_t`
 - Slot budget static assertion in `hades_sram_top` must pass for any shipped parameter set
 - Style: SV-2012, `` `default_nettype none ``, synchronous resets, no latches, 2-process FSMs, `for generate` for port arrays
+- XGUI: use `get_guiparamspec` only in `init_gui` and `update_gui_for_PARAM_VALUE.*`; change underlying parameter enablement in `update_PARAM_VALUE.*` with literal `true`/`false`. Do not set parameter enablement in `init_gui`.
+- `open_ip_gui.tcl` creates the IP first and defers `start_ip_gui -ip` until GUI startup has completed. Do not start customization during startup and exit before the deferred dialog opens.
 - No `TODO/FIXME/XXX` in `rtl/` (spec §7 DoD)
 
 ## TODO-list discipline (user-mandated)
-Keep the session TODO list live: exactly one `in_progress`, mark `done` immediately on completion, split tasks into finer sub-steps as work unfolds, add newly discovered work when discovered.
+Keep the session TODO list live: exactly one `in_progress` while work is active; mark tasks `done` immediately on completion and use `pending` for explicitly paused work. Split tasks into finer sub-steps as work unfolds and add newly discovered work when discovered.

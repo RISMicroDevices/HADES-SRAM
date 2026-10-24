@@ -5,11 +5,11 @@
 //   level-held until rd_gnt).  FCFS with fixed lowest-index priority; the
 //   TDMA slot gating of spec 3.2 is layered in front of this engine in M4
 //   (hades_sram_arbiter) without changing the engine itself.
-// - Reads: one 512-bit beat per access (DW <= 64), single AXI ID 0 so MIG
-//   returns strictly in issue order; a tracking FIFO carries {port, lane,
-//   timestamp, synthetic} for response routing and STAT_MAXLAT.
-// - Illegal addresses (>= cfg.port_size[p]) are not issued to AXI; a
-//   synthetic tracking entry returns zeros in order and flags
+// - Reads: one 512-bit beat per access, with 16 AXI IDs. Responses are
+//   in-order per ID; per-ID tracking carries {port, lane, timestamp, synthetic}
+//   for response routing and STAT_MAXLAT.
+// - Illegal addresses (>= cfg.port_size[p] >> cfg.wshift[p]) are not issued
+//   to AXI; a synthetic tracking entry returns zeros in order and flags
 //   ERR_STATUS.bit0.
 // - Writes: posted; WSTRB sub-word lane expansion; B tracked per port for
 //   SLVERR reporting.
@@ -18,7 +18,7 @@
 //   the maintenance window and idle slots.  Backdoor beats/lanes arrive
 //   pre-translated from hades_sram_backdoor; read data returns on bkp_rd_*.
 //   Backdoor traffic counts in stat_tot_* but not in per-port stats.
-// - Outstanding depth 32 (spec: >= 16).
+// - Tracking: 16 IDs, eight entries per ID (spec outstanding >= 16).
 //-----------------------------------------------------------------------------
 `default_nettype none
 
@@ -26,7 +26,10 @@ module hades_sram_mig_if
   import hades_sram_pkg::*;
 #(
   parameter int N  = N_MAX,
-  parameter int DW = DW_DEFAULT,
+  // per-port channel width — one AXI beat (v1.1.0).  Individual port widths
+  // (1..512) come from cfg (wshift/wbytes/be_en); a port's data is
+  // LSB-justified in its channel.
+  parameter int DW = 512,
   parameter int AW = AW_DEFAULT
 ) (
   input  wire logic        ui_clk,
@@ -41,6 +44,7 @@ module hades_sram_mig_if
   input  wire logic [N-1:0]          wr_vld,
   input  wire logic [N-1:0][AW-1:0]  wr_addr,
   input  wire logic [N-1:0][DW-1:0]  wr_data,
+  input  wire logic [N-1:0][63:0]    wr_be,   // byte enables (per cfg.be_en)
   output          logic [N-1:0]      wr_gnt,
 
   // per-port read responses (1 ui_clk cycle strobes)
@@ -107,17 +111,16 @@ module hades_sram_mig_if
   input  wire logic [5:0]                bkp_rd_lane,
   output          logic                  bkp_rd_gnt,
   output          logic                  bkp_rd_done,
-  output          logic [DW-1:0]         bkp_rd_data,
+  output          logic [31:0]           bkp_rd_data,
   input  wire logic                      bkp_wr_req,
   input  wire logic [BASE_W-1:0]         bkp_wr_beat,
   input  wire logic [5:0]                bkp_wr_lane,
-  input  wire logic [DW-1:0]             bkp_wr_data,
+  input  wire logic [31:0]               bkp_wr_data,
   output          logic                  bkp_wr_gnt
 );
 
   localparam logic [7:0] BKP_ID = 8'hFF;   // backdoor marker in tracking FIFOs
 
-  localparam int SH     = dw_shift(DW);   // addr bits selecting a lane
   localparam int TRK_D  = 8;              // per-ID outstanding depth (see below)
   localparam int TRK_W  = 6;              // track pointer width (DEPTH>... )
   localparam int TPW    = $clog2(TRK_D);
@@ -146,6 +149,7 @@ module hades_sram_mig_if
   logic [AW-1:0]         rd_addr_q;   // RD_IDLE: latched picked address
   logic [BASE_W-1:0]     rd_base_q;   // RD_PICK: port_base mux (quasi-static)
   logic [31:0]           rd_size_q;   // RD_PICK: port_size mux (quasi-static)
+  logic [2:0]            rd_wsh_q;    // RD_PICK: cfg.wshift mux (elaboration-constant)
   logic [N-1:0]          rd_req_masked;
   logic [BASE_W-1:0]     rd_beat;
   logic [5:0]            rd_lane;
@@ -268,13 +272,20 @@ module hades_sram_mig_if
   // (latched in RD_PICK), so this stage is only a 28-bit add + a compare —
   // mux+add in one cycle was the WNS-critical path.  For the backdoor pick
   // the mux output is garbage (index 63) and overridden by bkp_* anyway.
+  // v1.1.0: beat/lane/size-in-W-words use the picked port's lane shift
+  // (cfg.wshift, elaboration-constant), latched alongside base/size in
+  // RD_PICK — a W-word occupies 2^wshift lanes: beat = addr >> (4-wshift),
+  // lane group base = (addr & (0xF>>wshift)) << wshift, size compare in
+  // W-words = size_words >> wshift.
   wire logic               rd_pickq_bkp = (rd_pick_q == BKP_ID);
+  wire logic [31:0]        rd_size_w    = rd_size_q >> rd_wsh_q;
   wire logic               rd_illegal_w = !rd_pickq_bkp &&
-                                          (32'(rd_addr_q) >= rd_size_q);
+                                          (32'(rd_addr_q) >= rd_size_w);
+  wire logic [5:0]         rd_lmask_w   = 6'hF >> rd_wsh_q;
   wire logic [BASE_W-1:0]  rd_beat_w = rd_pickq_bkp ? bkp_rd_beat
-                                       : rd_base_q + BASE_W'(rd_addr_q >> SH);
+                                       : rd_base_q + BASE_W'(rd_addr_q >> (4 - rd_wsh_q));
   wire logic [5:0]         rd_lane_w = rd_pickq_bkp ? bkp_rd_lane
-                                       : 6'(rd_addr_q & {{(AW-SH){1'b0}}, {SH{1'b1}}});
+                                       : 6'((6'(rd_addr_q) & rd_lmask_w) << rd_wsh_q);
 
   // -- read FSM (2-process) --
   // arvalid is a REGISTER (300 MHz closure, 2026-10-21): the FSM-decode into
@@ -305,6 +316,7 @@ module hades_sram_mig_if
       rd_addr_q  <= '0;
       rd_base_q  <= '0;
       rd_size_q  <= '0;
+      rd_wsh_q   <= '0;
       rd_beat    <= '0;
       rd_lane    <= 6'd0;
       rd_illegal <= 1'b0;
@@ -337,6 +349,7 @@ module hades_sram_mig_if
           rd_addr_q  <= rd_pickq_bkp ? '0 : rd_addr[rd_pick_q[5:0]];
           rd_base_q  <= cfg.port_base[rd_pick_q[5:0]];
           rd_size_q  <= cfg.port_size[rd_pick_q[5:0]];
+          rd_wsh_q   <= cfg.wshift[rd_pick_q[5:0]];
           rd_state   <= RD_PREP;
         end
         RD_PREP: begin
@@ -405,6 +418,10 @@ module hades_sram_mig_if
   logic [DW-1:0] wr_data_q;
   logic [BASE_W-1:0] wr_base_q;   // WR_PICK: port_base mux (quasi-static)
   logic [31:0]       wr_size_q;   // WR_PICK: port_size mux (quasi-static)
+  logic [2:0]        wr_wsh_q;    // WR_PICK: cfg.wshift mux (elaboration-constant)
+  logic [6:0]        wr_wb_q;     // WR_PICK: cfg.wbytes mux (used bytes)
+  logic              wr_been_q;   // WR_PICK: cfg.be_en mux
+  logic [63:0]       wr_be_q;     // WR_PICK: byte-enable latch
   logic [N-1:0] wr_req_masked;
   logic         aw_done, w_done;
 
@@ -433,14 +450,21 @@ module hades_sram_mig_if
   wire logic [7:0] wr_pick  = wr_elig_ports ? first_set(wr_req_elig) : BKP_ID;
 
   // WR_PREP-stage derivations from REGISTERED operands (same 300 MHz split
-  // as the read engine: quasi-static base/size muxes latched in WR_PICK)
+  // as the read engine: quasi-static base/size muxes latched in WR_PICK).
+  // v1.1.0: beat/lane/size use the picked port's lane shift; the WSTRB byte
+  // mask comes from cfg.wbytes (partial top lane for odd widths) ANDed with
+  // the port's byte enables when cfg.be_en is set.
   wire logic               wr_pickq_bkp = (wr_pick_q == BKP_ID);
+  wire logic [31:0]        wr_size_w    = wr_size_q >> wr_wsh_q;
   wire logic               wr_illegal_w = !wr_pickq_bkp &&
-                                          (32'(wr_addr_q) >= wr_size_q);
+                                          (32'(wr_addr_q) >= wr_size_w);
+  wire logic [5:0]         wr_lmask_w   = 6'hF >> wr_wsh_q;
   wire logic [5:0]         wr_lane_w = wr_pickq_bkp ? bkp_wr_lane
-                                       : 6'(wr_addr_q & {{(AW-SH){1'b0}}, {SH{1'b1}}});
+                                       : 6'((6'(wr_addr_q) & wr_lmask_w) << wr_wsh_q);
   wire logic [BASE_W-1:0]  wr_beat_w = wr_pickq_bkp ? bkp_wr_beat
-                                       : wr_base_q + BASE_W'(wr_addr_q >> SH);
+                                       : wr_base_q + BASE_W'(wr_addr_q >> (4 - wr_wsh_q));
+  wire logic [63:0]        wr_wmask_w   = {64{1'b1}} >> (64 - wr_wb_q);
+  wire logic [63:0]        wr_bmask_w   = wr_been_q ? wr_be_q : {64{1'b1}};
 
   // write tracking (for B-channel SLVERR attribution), per AXI ID — the
   // MIG may complete different IDs out of order on B too
@@ -494,6 +518,10 @@ module hades_sram_mig_if
       wr_data_q  <= '0;
       wr_base_q  <= '0;
       wr_size_q  <= '0;
+      wr_wsh_q   <= '0;
+      wr_wb_q    <= '0;
+      wr_been_q  <= 1'b0;
+      wr_be_q    <= '0;
       wr_illegal <= 1'b0;
       wr_beat    <= '0;
       wr_data512 <= '0;
@@ -519,16 +547,20 @@ module hades_sram_mig_if
         WR_PICK: begin
           wr_sel     <= wr_pick_q;
           wr_addr_q  <= wr_pickq_bkp ? '0 : wr_addr[wr_pick_q[5:0]];
-          wr_data_q  <= wr_pickq_bkp ? bkp_wr_data : wr_data[wr_pick_q[5:0]];
+          wr_data_q  <= wr_pickq_bkp ? {{(DW-32){1'b0}}, bkp_wr_data} : wr_data[wr_pick_q[5:0]];
           wr_base_q  <= cfg.port_base[wr_pick_q[5:0]];
           wr_size_q  <= cfg.port_size[wr_pick_q[5:0]];
+          wr_wsh_q   <= cfg.wshift[wr_pick_q[5:0]];
+          wr_wb_q    <= wr_pickq_bkp ? 7'd4 : cfg.wbytes[wr_pick_q[5:0]];
+          wr_been_q  <= !wr_pickq_bkp && cfg.be_en[wr_pick_q[5:0]];
+          wr_be_q    <= wr_pickq_bkp ? {64{1'b1}} : wr_be[wr_pick_q[5:0]];
           wr_state   <= WR_PREP;
         end
         WR_PREP: begin
           wr_illegal <= wr_illegal_w;
           wr_beat    <= wr_beat_w;
-          wr_data512 <= 512'(wr_data_q) << (wr_lane_w * DW);
-          wr_strb64  <= (64'({64{1'b1}}) >> (64 - DW/8)) << (wr_lane_w * (DW/8));
+          wr_data512 <= wr_data_q << (wr_lane_w * 32);
+          wr_strb64  <= (wr_wmask_w & wr_bmask_w) << (wr_lane_w * 4);
           aw_done    <= 1'b0;
           w_done     <= 1'b0;
           wr_state   <= WR_ISSUE;
@@ -766,10 +798,13 @@ module hades_sram_mig_if
         trk_rptr[h_id] <= trk_rptr[h_id] + TPW'(1);
         if (acc_bkp_q) begin
           bkp_rd_done <= 1'b1;
-          bkp_rd_data <= DW'(rdata_q >> (acc_lane_q * DW));
+          bkp_rd_data <= 32'(rdata_q >> (acc_lane_q * 32));
         end else begin
           rsp_vld [acc_port_q[5:0]] <= 1'b1;
-          rsp_data[acc_port_q[5:0]] <= DW'(rdata_q >> (acc_lane_q * DW));
+          // full-beat shift, LSB-justified: the port truncates to its own
+          // width (v1.1.0) — no per-port mask needed on this (WNS-critical,
+          // iter-8) CE path
+          rsp_data[acc_port_q[5:0]] <= rdata_q >> (acc_lane_q * 32);
         end
       end
       if (fire_synth) begin

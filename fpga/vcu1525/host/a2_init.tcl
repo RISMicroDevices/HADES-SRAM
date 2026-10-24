@@ -13,8 +13,8 @@ if {$div eq ""} { set div 600 }
 hw_open
 reset_hw_axi [hw_axi]
 
-check_eq "BOARD_ID" [mrd $::BREG_ID] 0xB0AD0100
-check_eq "HADES ID" [mrd $::REG_ID] 0xADE50100
+check_eq "BOARD_ID" [mrd $::BREG_ID] 0xB0AD0110
+check_eq "HADES ID" [mrd $::REG_ID] 0xADE50110
 
 # config-integrity guard (2026-10-20 anomaly: one boot came up with garbage
 # nonzero config defaults — refresh_div=15 stormed the backend to death)

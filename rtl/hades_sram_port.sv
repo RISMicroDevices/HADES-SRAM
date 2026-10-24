@@ -24,6 +24,9 @@ module hades_sram_port
   parameter int AW      = AW_DEFAULT,
   parameter int DW      = DW_DEFAULT,
   parameter bit IS_SYNC = 1'b1,
+  // per-port byte-enable switch (v1.1.0): 0 = full-word writes, the be input
+  // is ignored; 1 = writes are byte-masked by be[ceil(DW/8)-1:0]
+  parameter bit BE_EN  = 1'b0,
   // M5-hw on-chip self-test (spec 6.2): 0 = absent (default), 1 = hades_sram_selftest
   // engine instantiated; it drives the request inputs while st_run is active
   parameter bit SELFTEST_EN  = 1'b0,
@@ -37,6 +40,7 @@ module hades_sram_port
   input  wire logic           we,         // 1=write, 0=read
   input  wire logic [AW-1:0]  addr,       // DW-word address
   input  wire logic [DW-1:0]  wdata,
+  input  wire logic [63:0]    be,        // byte enables (low ceil(DW/8) bits, BE_EN only)
   output          logic [DW-1:0] rdata,
   output          logic          rvalid,
 
@@ -58,6 +62,7 @@ module hades_sram_port
   output          logic       wr_vld,
   output          logic [AW-1:0]  wr_addr,
   output          logic [DW-1:0]  wr_data,
+  output          logic [63:0]    wr_be,    // byte enables with the write (all-ones if !BE_EN)
   input  wire logic           wr_gnt,     // 1 ui_clk cycle: head consumed
   input  wire logic           rsp_vld,    // 1 ui_clk cycle: read response
   input  wire logic [DW-1:0]  rsp_data,
@@ -98,6 +103,8 @@ module hades_sram_port
 
   // self-test stimulus mux (SELFTEST_EN builds): while the engine is active
   // it drives the request inputs instead of the integrator pins
+  localparam int BEW = (DW + 7) / 8;   // byte enables actually used (BE_EN only)
+
   logic        st_active;
   logic        st_req_en, st_req_we;
   logic [AW-1:0] st_req_addr;
@@ -105,11 +112,13 @@ module hades_sram_port
   logic        req_en, req_we;
   logic [AW-1:0] req_addr;
   logic [DW-1:0] req_wdata;
+  logic [BEW-1:0] req_be;
 
   assign req_en    = st_active ? st_req_en    : en;
   assign req_we    = st_active ? st_req_we    : we;
   assign req_addr  = st_active ? st_req_addr  : addr;
   assign req_wdata = st_active ? st_req_wdata : wdata;
+  assign req_be    = st_active ? {BEW{1'b1}}  : be[BEW-1:0];   // selftest writes full words
 
   // request accepted only when the port is live
   assign accept   = req_en & cfg_en & enabled;
@@ -136,19 +145,34 @@ module hades_sram_port
   // =========================================================================
   // Write request FIFO (port_clk -> ui_clk), depth 8 (spec minimum 2)
   // =========================================================================
-  hades_sram_afifo #(.WIDTH(AW+DW), .DEPTH(8)) u_wr_fifo (
+  localparam int FW = AW + DW + (BE_EN ? BEW : 0);
+  logic [FW-1:0] wr_fifo_w, wr_fifo_d;
+  assign wr_fifo_w = BE_EN ? FW'({req_be, req_addr, req_wdata})
+                           : FW'({req_addr, req_wdata});
+
+  hades_sram_afifo #(.WIDTH(FW), .DEPTH(8)) u_wr_fifo (
     .wclk   (port_clk),
     .wrst   (port_rst),
     .wpush  (wr_req_p),
-    .wdata  ({req_addr, req_wdata}),
+    .wdata  (wr_fifo_w),
     .wfull  (wr_full),
     .rclk   (ui_clk),
     .rrst   (ui_rst),
     .rpop   (wr_gnt),
-    .rdata  ({wr_addr, wr_data}),
+    .rdata  (wr_fifo_d),
     .rempty (wr_vld_n)
   );
   assign wr_vld = ~wr_vld_n;
+
+  if (BE_EN) begin : g_be
+    assign {wr_be[BEW-1:0], wr_addr, wr_data} = wr_fifo_d;
+    if (BEW < 64) begin : g_be_tie
+      assign wr_be[63:BEW] = '0;
+    end
+  end else begin : g_nobe
+    assign {wr_addr, wr_data} = wr_fifo_d;
+    assign wr_be = {64{1'b1}};
+  end
 
   // overflow sentinels (must never fire under the slot budget)
   always_ff @(posedge port_clk) begin

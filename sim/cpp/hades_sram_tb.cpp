@@ -9,6 +9,7 @@
 #include "svdpi.h"
 #include <cstdint>
 #include <cstdio>
+#include <array>
 #include <queue>
 #include <unordered_map>
 
@@ -20,14 +21,19 @@ int      g_err   = 0;
 int      g_check = 0;
 uint64_t g_base[kMaxPorts];
 uint32_t g_size[kMaxPorts];
+uint32_t g_width[kMaxPorts];   // bits per port word (v1.1.0), default 32
+uint32_t g_wshift[kMaxPorts];  // log2 lane count, pow2(ceil(W/32))
+uint32_t g_wbytes[kMaxPorts];  // ceil(W/8)
 
-// expected SRAM contents: key = (port << 32) | word_addr
-std::unordered_map<uint64_t, uint32_t> g_mem;
+// expected SRAM contents: key = (port << 32) | word_addr (in W-bit words);
+// value = the full 512-bit channel image, LSB-justified
+using Word = std::array<uint32_t, 16>;
+std::unordered_map<uint64_t, Word> g_mem;
 
 // per-port expected read releases, in request order
 struct ExpRd {
   uint64_t due_cycle;
-  uint32_t data;
+  Word     data;
   bool     late;   // T14: data arrives late; rvalid on schedule, data don't-care
 };
 std::queue<ExpRd> g_exp[kMaxPorts];
@@ -48,6 +54,9 @@ void hades_init() {
   for (int i = 0; i < kMaxPorts; i++) {
     g_base[i] = 0;
     g_size[i] = 0;
+    g_width[i] = 32;
+    g_wshift[i] = 0;
+    g_wbytes[i] = 4;
     while (!g_exp[i].empty()) g_exp[i].pop();
   }
   g_mem.clear();
@@ -68,7 +77,7 @@ void hades_suspend_checks(int on) { g_suspend = on; }
 
 // ---------------------------------------------------------------- models ---
 
-long long hades_exp_id() { return 0xADE50100LL; }
+long long hades_exp_id() { return 0xADE50110LL; }
 
 // PARAMS word: bit31=CLK_MODE(1=SYNC), [30:20]=ui_mhz, [19:12]=port_mib,
 // [11:8]=dw/8, [7:0]=n_max
@@ -86,56 +95,104 @@ void hades_set_port_cfg(int port, long long base, int size) {
   }
 }
 
+// per-port width in bits (v1.1.0): 1..512, elaboration-fixed
+void hades_set_port_width(int port, int bits) {
+  if (port < 0 || port >= kMaxPorts) return;
+  g_width[port]  = (uint32_t)bits;
+  uint32_t lc = ((uint32_t)bits + 31) / 32;   // lane count, then pow2
+  g_wshift[port] = lc <= 1 ? 0 : lc <= 2 ? 1 : lc <= 4 ? 2 : lc <= 8 ? 3 : 4;
+  g_wbytes[port] = ((uint32_t)bits + 7) / 8;
+}
+
 long long hades_exp_base(int port) { return (long long)g_base[port & (kMaxPorts - 1)]; }
 int       hades_exp_size(int port) { return (int)g_size[port & (kMaxPorts - 1)]; }
 
 // ------------------------------------------------- expected memory model ---
 
-void hades_mem_write(int port, int addr, int data) {
-  g_mem[((uint64_t)port << 32) | (uint32_t)addr] = (uint32_t)data;
+void hades_mem_write(int port, int addr, const svBitVecVal* data) {
+  Word w;
+  for (int i = 0; i < 16; i++) w[i] = data[i];
+  g_mem[((uint64_t)port << 32) | (uint32_t)addr] = w;
+}
+
+// byte-enabled write (v1.1.0 BE): merge only enabled bytes of the word
+void hades_mem_write_be(int port, int addr, const svBitVecVal* data, long long be) {
+  Word& cur = g_mem[((uint64_t)port << 32) | (uint32_t)addr];
+  uint32_t nb = g_wbytes[port & (kMaxPorts - 1)];
+  for (uint32_t b = 0; b < nb; b++) {
+    if ((be >> b) & 1LL) {
+      uint32_t from = ((uint32_t)data[b / 4] >> ((b % 4) * 8)) & 0xFFu;
+      cur[b / 4] = (cur[b / 4] & ~(0xFFu << ((b % 4) * 8))) | (from << ((b % 4) * 8));
+    }
+  }
 }
 
 // a read issued to `port` for `addr` must release exactly at `due_cycle`
 void hades_read_expect(int port, long long due_cycle, int addr) {
   uint64_t k = ((uint64_t)port << 32) | (uint32_t)addr;
   auto it = g_mem.find(k);
-  g_exp[port & (kMaxPorts - 1)].push(
-      {(uint64_t)due_cycle, it == g_mem.end() ? 0u : it->second, false});
+  ExpRd e;
+  e.due_cycle = (uint64_t)due_cycle;
+  e.late = false;
+  if (it == g_mem.end()) e.data.fill(0u);
+  else                   e.data = it->second;
+  g_exp[port & (kMaxPorts - 1)].push(e);
 }
 
 // a read to an illegal address returns 0 on schedule (synthetic response)
 void hades_read_expect0(int port, long long due_cycle) {
-  g_exp[port & (kMaxPorts - 1)].push({(uint64_t)due_cycle, 0u, false});
+  ExpRd e;
+  e.due_cycle = (uint64_t)due_cycle;
+  e.late = false;
+  e.data.fill(0u);
+  g_exp[port & (kMaxPorts - 1)].push(e);
 }
 
 // T14 fault injection: the response is expected to arrive late, so the data
 // released on schedule is don't-care — but rvalid must still assert exactly
 // at `due_cycle` (the cycle-level contract stays observable, spec 4.3)
 void hades_read_expect_late(int port, long long due_cycle) {
-  g_exp[port & (kMaxPorts - 1)].push({(uint64_t)due_cycle, 0u, true});
+  ExpRd e;
+  e.due_cycle = (uint64_t)due_cycle;
+  e.late = true;
+  e.data.fill(0u);
+  g_exp[port & (kMaxPorts - 1)].push(e);
 }
 
 // called for every port at every port_clk edge (post-edge sample):
 // rvalid must be 1 iff the head of the port's queue is due this cycle
-void hades_port_edge(int port, long long cycle, int rvalid, int rdata) {
+void hades_port_edge(int port, long long cycle, int rvalid, const svBitVecVal* rdata) {
   if (g_suspend) return;   // reset-recovery window: in-flight state wiped
-  auto& q = g_exp[port & (kMaxPorts - 1)];
+  int p = port & (kMaxPorts - 1);
+  auto& q = g_exp[p];
   if (!q.empty() && q.front().due_cycle == (uint64_t)cycle) {
     g_check++;
     if (!rvalid) {
       g_err++;
       printf("[HADES-TB] FAIL: port %d missing rvalid at cycle %lld (T2 violation)\n",
-             port, cycle);
-    } else if (!q.front().late && (uint32_t)rdata != q.front().data) {
-      g_err++;
-      printf("[HADES-TB] FAIL: port %d cycle %lld data got=0x%08x exp=0x%08x\n",
-             port, cycle, (uint32_t)rdata, q.front().data);
+             p, cycle);
+    } else if (!q.front().late) {
+      uint32_t nb = g_width[p];
+      for (uint32_t b = 0; b < nb; b++) {
+        int got = (rdata[b / 32] >> (b % 32)) & 1;
+        int exp = (q.front().data[b / 32] >> (b % 32)) & 1;
+        if (got != exp) {
+          g_err++;
+          printf("[HADES-TB] FAIL: port %d cycle %lld data bit %u got=%d exp=%d\n",
+                 p, cycle, b, got, exp);
+          printf("[HADES-TB]   got  w0=%08x w1=%08x w2=%08x w3=%08x\n",
+                 rdata[0], rdata[1], rdata[2], rdata[3]);
+          printf("[HADES-TB]   exp  w0=%08x w1=%08x w2=%08x w3=%08x\n",
+                 q.front().data[0], q.front().data[1], q.front().data[2], q.front().data[3]);
+          break;
+        }
+      }
     }
     q.pop();
   } else if (rvalid) {
     g_err++;
     printf("[HADES-TB] FAIL: port %d unexpected/early rvalid at cycle %lld (T2 violation)\n",
-           port, cycle);
+           p, cycle);
   }
 }
 

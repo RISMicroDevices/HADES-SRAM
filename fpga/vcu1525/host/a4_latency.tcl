@@ -40,7 +40,7 @@ foreach L {2 1} {
   mwr $::REG_CTRL [expr {$::CTRL_ENABLE | $::CTRL_SELFTEST}]
   after 500                                    ;# engines settle into RD bursts
   set ila [ila_find *u_ila_pc*]
-  ila_arm $ila {u_hades/g_ports[0].u_port/rd_req_p} eq1'b1 1024
+  ila_arm $ila {u_hades/g_port0.u_port/rd_req_p} eq1'b1 1024
   set cap [ila_capture_csv $ila $here/cap_a4_L${L}_div${div}.csv]
   mwr $::REG_CTRL $::CTRL_ENABLE
   after 100
@@ -53,8 +53,8 @@ foreach L {2 1} {
   # dropped — it can answer a pre-window request.  2026-10-22: parser fixed
   # (0b-bareword bug read every cell as 0) + taps DONT_TOUCHed.
   set rows [ila_csv_rows $cap]
-  set gaps [ila_req_rv_gaps $rows {u_hades/g_ports[0].u_port/rd_req_p} \
-                                 {u_hades/g_ports[0].u_port/rvalid}]
+  set gaps [ila_req_rv_gaps $rows {u_hades/g_port0.u_port/rd_req_p} \
+                                 {u_hades/g_port0.u_port/rvalid}]
   puts "ok:   ILA req->rvalid gaps (L=$L): $gaps"
   if {[llength $gaps] < 2} {
     note_fail "ILA capture has no req/rvalid pairs (L=$L)"
@@ -65,7 +65,7 @@ foreach L {2 1} {
     }
     check_eq "ILA req->rvalid spacing constant L+1 (L=$L)" $bad 0
   }
-  set nr [ila_count_rises $rows {u_hades/g_ports[0].u_port/rvalid}]
+  set nr [ila_count_rises $rows {u_hades/g_port0.u_port/rvalid}]
   check_range "ILA rvalid edges in window" $nr 1 4096
 }
 

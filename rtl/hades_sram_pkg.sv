@@ -11,7 +11,7 @@ package hades_sram_pkg;
   // Compile-time capacity
   // ------------------------------------------------------------------
   localparam int N_MAX       = 64;   // compile-time port ceiling (arch: 128)
-  localparam int DW_DEFAULT  = 32;   // legal values {8,16,32,64}
+  localparam int DW_DEFAULT  = 32;   // legacy 32-bit lane word; per-port W<i> can be 1..512
   localparam int AW_DEFAULT  = 22;   // 16 MiB / 4 B per 32-bit word
   localparam int UI_CLK_MHZ  = 300;
 
@@ -83,8 +83,28 @@ package hades_sram_pkg;
     logic [31:0]                refresh_div;  // ui_clk cycles between ref slots
     logic [31:0]                zq_div;       // target periods between ZQCS
     logic [N_MAX-1:0][BASE_W-1:0] port_base;  // per-port base, 512-bit words
-    logic [N_MAX-1:0][31:0]       port_size;  // per-port size, words
+    logic [N_MAX-1:0][31:0]       port_size;  // per-port size, 32-bit words
+    logic [N_MAX-1:0][2:0]        wshift;     // log2 lane count, pow2(ceil(W/32))
+    logic [N_MAX-1:0][6:0]        wbytes;     // ceil(W/8): used bytes in the lane group
+    logic [N_MAX-1:0]             be_en;      // per-port byte-enable switch (elaboration)
   } cfg_t;
+
+  // Per-port width model (v1.1.0): a port of width W bits (1..512) occupies
+  // 2^ceil(log2(ceil(W/32))) consecutive 32-bit AXI lanes, lane-group aligned
+  // (power-of-two so a group never straddles a beat; tail lanes of the group
+  // are unused for non-pow2 widths).  Every op stays exactly one 64 B beat,
+  // so the slot budget and the exact-L contract are width-independent.
+  // wshift = log2(lane count): beat = addr >> (4-wshift); lane group base =
+  // (addr & ((1<<(4-wshift))-1)) << wshift; W-word count = size_words>>wshift.
+  function automatic logic [2:0] wshift_f(input int w);
+    int lc;
+    lc = (w + 31) / 32;
+    return (lc <= 1) ? 3'd0 : (lc <= 2) ? 3'd1 : (lc <= 4) ? 3'd2
+                                                       : (lc <= 8) ? 3'd3 : 3'd4;
+  endfunction
+  function automatic logic [6:0] wbytes_f(input int w);
+    return 7'((w + 7) / 8);
+  endfunction
 
   // Default flat per-port maps: contiguous equal 16 MiB partitions.
   function automatic logic [N_MAX*BASE_W-1:0] dflt_base_flat();
@@ -94,8 +114,8 @@ package hades_sram_pkg;
     return v;
   endfunction
 
-  // Default per-port sizes in DW-bit words (PORT_SIZE unit — see
-  // csr_regmap.md): 16 MiB / (dw/8) words.
+  // Default per-port sizes in 32-bit lane words (PORT_SIZE unit — see
+  // csr_regmap.md): 16 MiB / (dw/8) lane words.
   function automatic logic [N_MAX*32-1:0] dflt_size_flat(input int dw);
     logic [N_MAX*32-1:0] v;
     for (int i = 0; i < N_MAX; i++)
@@ -112,7 +132,9 @@ package hades_sram_pkg;
     input logic [31:0]              refresh_div,
     input logic [31:0]              zq_div,
     input logic [N_MAX*BASE_W-1:0]  base_flat,
-    input logic [N_MAX*32-1:0]      size_flat
+    input logic [N_MAX*32-1:0]      size_flat,
+    input logic [N_MAX*10-1:0]      width_flat,
+    input logic [N_MAX-1:0]         be_en_flat
   );
     cfg_t c;
     c.latency      = latency;
@@ -121,9 +143,12 @@ package hades_sram_pkg;
     c.min_period   = min_period;
     c.refresh_div  = refresh_div;
     c.zq_div       = zq_div;
+    c.be_en        = be_en_flat;
     for (int i = 0; i < N_MAX; i++) begin
       c.port_base[i] = base_flat[i*BASE_W +: BASE_W];
       c.port_size[i] = size_flat[i*32 +: 32];
+      c.wshift[i]    = wshift_f(32'(width_flat[i*10 +: 10]));
+      c.wbytes[i]    = wbytes_f(32'(width_flat[i*10 +: 10]));
     end
     return c;
   endfunction
@@ -141,6 +166,7 @@ package hades_sram_pkg;
   localparam logic [15:0] CSR_CFG_MIN_PERIOD  = 16'h001C;
   localparam logic [15:0] CSR_PORT_SEL        = 16'h0020;
   localparam logic [15:0] CSR_PORT_BASE       = 16'h0024;
+  localparam logic [15:0] CSR_PORT_WIDTH      = 16'h003C;
   localparam logic [15:0] CSR_PORT_BASE_HI    = 16'h0028;
   localparam logic [15:0] CSR_PORT_SIZE       = 16'h002C;
   localparam logic [15:0] CSR_PORT_STAT_RD    = 16'h0030;
@@ -168,10 +194,10 @@ package hades_sram_pkg;
   localparam logic [15:0] CSR_BKP_STATUS      = 16'h00A8;
 
   // ID / PARAMS constants
-  localparam logic [31:0] ID_MAGIC  = 32'hADE5_0100;  // "HADES" v1.0
+  localparam logic [31:0] ID_MAGIC  = 32'hADE5_0110;  // "HADES" v1.1
 
   // PARAMS layout: bit31=CLK_MODE, [30:20]=ui_clk MHz, [19:12]=port MiB,
-  //                [11:8]=DW/8, [7:0]=N_MAX
+  //                [11:8]=default lane bytes, [7:0]=N_MAX
   function automatic logic [31:0] params_word(input clk_mode_e m, input int ui_mhz,
                                               input int port_mb, input int dw);
     return {m, 11'(ui_mhz), 8'(port_mb), 4'(dw/8), 8'(N_MAX)};

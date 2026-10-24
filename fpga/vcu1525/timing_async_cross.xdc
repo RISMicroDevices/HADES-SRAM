@@ -26,7 +26,7 @@ set_max_delay -datapath_only 3.3 \
 
 # qs_bus quasi-static crossings (STAGES=0 hold slots etc.): protocol-guaranteed
 # stable around sampling; bound the wire delay.  Generate scopes join with '.'
-# (g_ports[i].u_port/...), so an anchored '*/u_port/' glob never matches —
+# (g_port0.u_port/...), so an anchored '*/u_port/' glob never matches —
 # verified against post_synth.dcp: bare patterns hit 8192/256 cells exactly.
 set_max_delay -datapath_only 10.0 \
     -from [get_cells -hier -filter {NAME =~ *slot_data_u_reg*}] -quiet

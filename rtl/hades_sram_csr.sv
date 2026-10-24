@@ -30,6 +30,11 @@ module hades_sram_csr
   parameter int PORT_MB       = PORT_MB_DEFAULT,
   parameter bit SELFTEST_EN   = 1'b0   // CTRL.SELFTEST implemented (M5-hw)
 ) (
+  // per-port elaboration constants (v1.1.0), wired from the top-level
+  // parameters: port width in bits (1..512, packed 10-bit fields) and the
+  // per-port byte-enable switch
+  input  wire logic [N_MAX*10-1:0] widths_i,
+  input  wire logic [N_MAX-1:0]    be_en_i,
   input  wire logic        ui_clk,
   input  wire logic        ui_rst,
 
@@ -176,6 +181,8 @@ module hades_sram_csr
       CSR_PORT_BASE_HI:    s_axil_rdata = sel_ok ? {30'd0, port_base_q[port_sel][BASE_W-1:32]}
                                                  : 32'd0;
       CSR_PORT_SIZE:       s_axil_rdata = sel_ok ? port_size_q[port_sel]        : 32'd0;
+      CSR_PORT_WIDTH:      s_axil_rdata = sel_ok ? {22'd0, widths_i[port_sel*10 +: 10]}
+                                                 : 32'd0;
       CSR_PORT_STAT_RD:    s_axil_rdata = sel_ok ? port_stat_rd[port_sel]       : 32'd0;
       CSR_PORT_STAT_WR:    s_axil_rdata = sel_ok ? port_stat_wr[port_sel]       : 32'd0;
       CSR_PORT_STAT_ERR:   s_axil_rdata = sel_ok ? port_stat_err[port_sel]      : 32'd0;
@@ -242,7 +249,7 @@ module hades_sram_csr
       fb = dflt_base_flat();
       for (i = 0; i < N_MAX; i = i + 1) begin
         port_base_q[i] <= fb[i*BASE_W +: BASE_W];
-        port_size_q[i] <= 32'((64'(PORT_MB) * 1024 * 1024) / (DW / 8));  // DW-bit words
+        port_size_q[i] <= 32'((64'(PORT_MB) * 1024 * 1024) / (DW / 8));  // 32-bit lane words
       end
     end else begin
       // ---- bus capture ----
@@ -395,6 +402,11 @@ module hades_sram_csr
     cfg.zq_div       = zq_div;
     cfg.port_base    = port_base_q;
     cfg.port_size    = port_size_q;
+    cfg.be_en        = be_en_i;
+    for (int i = 0; i < N_MAX; i++) begin
+      cfg.wshift[i] = wshift_f(32'(widths_i[i*10 +: 10]));
+      cfg.wbytes[i] = wbytes_f(32'(widths_i[i*10 +: 10]));
+    end
   end
 
   assign port_sel_o = port_sel;

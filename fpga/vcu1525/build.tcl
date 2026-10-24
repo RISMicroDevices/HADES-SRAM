@@ -121,8 +121,8 @@ write_checkpoint -force $bdir/post_synth.dcp
 set pc_nets_p0 [list]
 set pc_nets_p1 [list]
 foreach i {0 1 2 3} {
-  set rq [get_nets "u_hades/g_ports[$i].u_port/rd_req_p"]
-  set rv [get_nets "u_hades/g_ports[$i].u_port/rvalid"]
+  set rq [get_nets "u_hades/g_port${i}.u_port/rd_req_p"]
+  set rv [get_nets "u_hades/g_port${i}.u_port/rvalid"]
   if {![llength $rq] || ![llength $rv]} {
     puts "HADES-BUILD FAIL: ILA probe nets not found for port $i"; exit 1
   }

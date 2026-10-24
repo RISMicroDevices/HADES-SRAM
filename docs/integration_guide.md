@@ -194,3 +194,36 @@ Sim gates at ship: VCS 18/18 legs + coverage 99.77% line / 100% FSM; xsim 17/17 
 - `hades_quiesce` (SELFTEST off → ≥16 port periods → SOFT_RESET) before every test — absorbs dirty state from a crashed previous session
 - Long durations are Windows-host-clock anchored (§8 WSL2 drift)
 - Run host scripts with output to a file: a truncated pipe (`| head`) SIGPIPE-kills Vivado mid-script
+
+## 13. v1.1.0 interface and verification update (2026-10-24)
+
+### 13.1 Interface and configuration
+
+- Physical SRAM ports are separated as `sram0`…`sram63`; `N` defaults to 1 and can be configured from 1 to 64. Each port has independent `W<i>` (any integer 1–512) and `BE<i>_EN` parameters. Non-power-of-two widths are supported and are not restricted to the MIG's native power-of-two lane groups.
+- One frontend operation remains one 64-byte backend beat. A port occupies `LC = 2^ceil(log2(ceil(W/32)))` consecutive 32-bit lanes. `PORT_SIZE` and backdoor addresses use 32-bit lane units, not generic `W`-bit words; frontend capacity is `PORT_SIZE/LC` port words. `PORT_WIDTH` at CSR `0x3C` reports the selected port's width.
+- Width and byte-enable switches are elaboration-time settings. CSR continues to control runtime masks, latency, address windows, and maintenance settings. Static (`CSR_EN=0`) configuration uses the same width/BE parameters and requires no boot bus.
+- Core `ID` is `0xADE50110` and board `BOARD_ID` is `0xB0AD0110`. Simulation and host-side expected values were updated with the release.
+
+### 13.2 On-board quick regression (64 ports, all `W=32`, BE off)
+
+- SYNC implementation completed with setup WNS `+0.011 ns`, hold WNS `+0.006 ns`, and zero DRC errors. This was a quick regression, not a repeat of the complete §12 acceptance campaign.
+- JTAG-AXI scratch and core ID checks passed; all 64 `PORT_WIDTH` readbacks returned 32.
+- A2(600) passed with calibration and READY; `MEAS_PERIOD=600`, or 300 MHz backend to 500 KHz frontend (600:1).
+- A4(600,3,56) passed at L=1 and L=2: every selected port and the global error registers stayed zero; sampled ILA request-to-response gaps were constant L+1.
+- Logs: `/tmp/v110_board_{sync_build,program,smoke,a2,a4}.log`. The JTAG session was closed afterward.
+
+### 13.3 Packaging and GUI verification
+
+- Catalog VLNV is `rismd.cn:hades:hades_sram:1.1`. Batch checks cover 1, 4, and 64 exposed interfaces, default and mixed out-of-context synthesis, and exact generated wrapper widths for W=40, 1, 300, and 512 bits.
+- `open_ip_gui.tcl` creates the IP instance first and defers `start_ip_gui -ip` until GUI startup completes. The final helper opens with default N=1 without a `rdi::create_slave` scope error.
+- XGUI separates widget updates (`update_gui_for_PARAM_VALUE.*`) from parameter enablement (`update_PARAM_VALUE.*`). The GUI accepted and saved N=4 with W=40/1/300/512 and BE enabled on ports 0 and 3; CSR and self-test controls also enabled their dependent fields correctly.
+- The block diagram exposes four expandable SRAM tags in the mixed test. Expanding `sram2` confirmed 300-bit data and its associated control/address/BE signals. Evidence: `/tmp/v110_final_callback_ports.png`, `/tmp/v110_gui_bd_final.png`, and `/mnt/c/Users/Public/Documents/hades_v110_final_smoke/vivado.log`.
+
+### 13.4 Release verification
+
+- VCS passed all nine variants, maintenance/error legs, the 1,000,000-cycle SYNC regression, the 100,000-cycle ASYNC regression, and all static-budget checks. Merged DUT coverage is 99.72% line and 100% FSM. Log: `/tmp/v110_release_vcs.log`.
+- `make -C sim lint` passed for CSR, static, and self-test elaboration variants. Log: `/tmp/v110_release_lint.log`.
+- `ip/package_ip.tcl` passed with the updated core ID: catalog registration, 1/4/64 interface counts, sequential mixed/static/self-test parameter updates, default and mixed synthesis, and exact wrapper widths. Log: `/tmp/v110_release_ip_package.log`.
+- The final SYNC implementation met all user timing constraints: setup WNS `+0.001 ns`, hold WNS `+0.010 ns`, zero DRC errors. `fpga/vcu1525/build/sync/hades_sram_vcu1525_sync.bit` was generated (80,159,233 bytes) with its `.ltx` probe file. Log: `/tmp/v110_release_sync_build.log`. No board programming was performed for this ID-updated build; this is implementation evidence, not a new on-board acceptance run.
+- xsim passed all nine variants, maintenance/error legs, the reduced 50,000-cycle regression, and all static-budget checks. Log: `/tmp/v110_release_xsim.log`.
+- HADES-Fabric remained active and occupied the board during release verification. The final ID-updated bitstream was not programmed or re-tested on-board. Before a new hardware acceptance campaign, run the JTAG smoke/A2 checks with the new core and board IDs and continue with the sustained-load tests. The earlier v1.1.0 quick regression is recorded in §13.2.

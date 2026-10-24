@@ -26,6 +26,9 @@ xsc.dir/
 *.backup.log
 vivado*.jou
 vivado*.log
+vivado*.str
+hs_err_pid*.log
+hs_err_pid*.dmp
 .tmpCRC/
 clockInfo.txt
 iter_*_CongestedCLBsAndNets.txt
@@ -36,6 +39,7 @@ tight_setup_hold_pins.txt
 fpga/vcu1525/spike/work/
 fpga/vcu1525/spike/ex_proj/
 fpga/vcu1525/build/
+fpga/vcu1525/.cache/
 fpga/vcu1525/work_*/
 ip/work_pkg/
 ip/work_verify/

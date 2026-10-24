@@ -4,7 +4,7 @@
 // Separate from the HADES IP CSR (address 0x0_0000): these registers control
 // the BOARD's port_clk generator, not the emulated-SRAM core.
 //
-//   0x00 BOARD_ID        RO  32'hB0AD_0100
+//   0x00 BOARD_ID        RO  32'hB0AD_0110
 //   0x04 SCRATCH         RW  read/write loopback (JTAG-AXI path smoke test)
 //   0x08 CLK_DIV         RW  src_clk cycles per port_clk period (pending)
 //   0x0C CLK_CTRL        RW  bit0 GATE (1=run port_clk, 0=stop low);
@@ -110,7 +110,7 @@ module board_ctrl (
 
   always_comb begin
     case (ar_a)
-      16'h0000:  s_axil_rdata = 32'hB0AD_0100;
+      16'h0000:  s_axil_rdata = 32'hB0AD_0110;
       16'h0004:  s_axil_rdata = scratch_q;
       16'h0008:  s_axil_rdata = {16'd0, clk_div};
       16'h000C:  s_axil_rdata = {23'd0, 8'd0, clk_gate};

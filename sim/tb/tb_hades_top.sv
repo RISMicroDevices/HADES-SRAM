@@ -29,7 +29,137 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-module tb_hades_top;
+module tb_hades_top #(
+  parameter int N = 64,   // DUT active ports (regression default)
+  parameter int W0 = 32,
+  parameter int W1 = 32,
+  parameter int W2 = 32,
+  parameter int W3 = 32,
+  parameter int W4 = 32,
+  parameter int W5 = 32,
+  parameter int W6 = 32,
+  parameter int W7 = 32,
+  parameter int W8 = 32,
+  parameter int W9 = 32,
+  parameter int W10 = 32,
+  parameter int W11 = 32,
+  parameter int W12 = 32,
+  parameter int W13 = 32,
+  parameter int W14 = 32,
+  parameter int W15 = 32,
+  parameter int W16 = 32,
+  parameter int W17 = 32,
+  parameter int W18 = 32,
+  parameter int W19 = 32,
+  parameter int W20 = 32,
+  parameter int W21 = 32,
+  parameter int W22 = 32,
+  parameter int W23 = 32,
+  parameter int W24 = 32,
+  parameter int W25 = 32,
+  parameter int W26 = 32,
+  parameter int W27 = 32,
+  parameter int W28 = 32,
+  parameter int W29 = 32,
+  parameter int W30 = 32,
+  parameter int W31 = 32,
+  parameter int W32 = 32,
+  parameter int W33 = 32,
+  parameter int W34 = 32,
+  parameter int W35 = 32,
+  parameter int W36 = 32,
+  parameter int W37 = 32,
+  parameter int W38 = 32,
+  parameter int W39 = 32,
+  parameter int W40 = 32,
+  parameter int W41 = 32,
+  parameter int W42 = 32,
+  parameter int W43 = 32,
+  parameter int W44 = 32,
+  parameter int W45 = 32,
+  parameter int W46 = 32,
+  parameter int W47 = 32,
+  parameter int W48 = 32,
+  parameter int W49 = 32,
+  parameter int W50 = 32,
+  parameter int W51 = 32,
+  parameter int W52 = 32,
+  parameter int W53 = 32,
+  parameter int W54 = 32,
+  parameter int W55 = 32,
+  parameter int W56 = 32,
+  parameter int W57 = 32,
+  parameter int W58 = 32,
+  parameter int W59 = 32,
+  parameter int W60 = 32,
+  parameter int W61 = 32,
+  parameter int W62 = 32,
+  parameter int W63 = 32,
+  parameter bit BE0_EN = 1'b0,
+  parameter bit BE1_EN = 1'b0,
+  parameter bit BE2_EN = 1'b0,
+  parameter bit BE3_EN = 1'b0,
+  parameter bit BE4_EN = 1'b0,
+  parameter bit BE5_EN = 1'b0,
+  parameter bit BE6_EN = 1'b0,
+  parameter bit BE7_EN = 1'b0,
+  parameter bit BE8_EN = 1'b0,
+  parameter bit BE9_EN = 1'b0,
+  parameter bit BE10_EN = 1'b0,
+  parameter bit BE11_EN = 1'b0,
+  parameter bit BE12_EN = 1'b0,
+  parameter bit BE13_EN = 1'b0,
+  parameter bit BE14_EN = 1'b0,
+  parameter bit BE15_EN = 1'b0,
+  parameter bit BE16_EN = 1'b0,
+  parameter bit BE17_EN = 1'b0,
+  parameter bit BE18_EN = 1'b0,
+  parameter bit BE19_EN = 1'b0,
+  parameter bit BE20_EN = 1'b0,
+  parameter bit BE21_EN = 1'b0,
+  parameter bit BE22_EN = 1'b0,
+  parameter bit BE23_EN = 1'b0,
+  parameter bit BE24_EN = 1'b0,
+  parameter bit BE25_EN = 1'b0,
+  parameter bit BE26_EN = 1'b0,
+  parameter bit BE27_EN = 1'b0,
+  parameter bit BE28_EN = 1'b0,
+  parameter bit BE29_EN = 1'b0,
+  parameter bit BE30_EN = 1'b0,
+  parameter bit BE31_EN = 1'b0,
+  parameter bit BE32_EN = 1'b0,
+  parameter bit BE33_EN = 1'b0,
+  parameter bit BE34_EN = 1'b0,
+  parameter bit BE35_EN = 1'b0,
+  parameter bit BE36_EN = 1'b0,
+  parameter bit BE37_EN = 1'b0,
+  parameter bit BE38_EN = 1'b0,
+  parameter bit BE39_EN = 1'b0,
+  parameter bit BE40_EN = 1'b0,
+  parameter bit BE41_EN = 1'b0,
+  parameter bit BE42_EN = 1'b0,
+  parameter bit BE43_EN = 1'b0,
+  parameter bit BE44_EN = 1'b0,
+  parameter bit BE45_EN = 1'b0,
+  parameter bit BE46_EN = 1'b0,
+  parameter bit BE47_EN = 1'b0,
+  parameter bit BE48_EN = 1'b0,
+  parameter bit BE49_EN = 1'b0,
+  parameter bit BE50_EN = 1'b0,
+  parameter bit BE51_EN = 1'b0,
+  parameter bit BE52_EN = 1'b0,
+  parameter bit BE53_EN = 1'b0,
+  parameter bit BE54_EN = 1'b0,
+  parameter bit BE55_EN = 1'b0,
+  parameter bit BE56_EN = 1'b0,
+  parameter bit BE57_EN = 1'b0,
+  parameter bit BE58_EN = 1'b0,
+  parameter bit BE59_EN = 1'b0,
+  parameter bit BE60_EN = 1'b0,
+  parameter bit BE61_EN = 1'b0,
+  parameter bit BE62_EN = 1'b0,
+  parameter bit BE63_EN = 1'b0
+) ();
   import hades_sram_pkg::*;
 
   // ------------------------------------------------------------------
@@ -50,6 +180,148 @@ module tb_hades_top;
 `else
   localparam bit TB_SELFTEST = 1'b0;
 `endif
+
+
+  // TB mirror of the DUT's per-port width parameters (v1.1.0)
+  function automatic int w_of(input int p);
+    case (p)
+      0: return W0;
+      1: return W1;
+      2: return W2;
+      3: return W3;
+      4: return W4;
+      5: return W5;
+      6: return W6;
+      7: return W7;
+      8: return W8;
+      9: return W9;
+      10: return W10;
+      11: return W11;
+      12: return W12;
+      13: return W13;
+      14: return W14;
+      15: return W15;
+      16: return W16;
+      17: return W17;
+      18: return W18;
+      19: return W19;
+      20: return W20;
+      21: return W21;
+      22: return W22;
+      23: return W23;
+      24: return W24;
+      25: return W25;
+      26: return W26;
+      27: return W27;
+      28: return W28;
+      29: return W29;
+      30: return W30;
+      31: return W31;
+      32: return W32;
+      33: return W33;
+      34: return W34;
+      35: return W35;
+      36: return W36;
+      37: return W37;
+      38: return W38;
+      39: return W39;
+      40: return W40;
+      41: return W41;
+      42: return W42;
+      43: return W43;
+      44: return W44;
+      45: return W45;
+      46: return W46;
+      47: return W47;
+      48: return W48;
+      49: return W49;
+      50: return W50;
+      51: return W51;
+      52: return W52;
+      53: return W53;
+      54: return W54;
+      55: return W55;
+      56: return W56;
+      57: return W57;
+      58: return W58;
+      59: return W59;
+      60: return W60;
+      61: return W61;
+      62: return W62;
+      63: return W63;
+      default: return 32;
+    endcase
+  endfunction
+
+  function automatic int be_of(input int p);
+    case (p)
+      0: return BE0_EN;
+      1: return BE1_EN;
+      2: return BE2_EN;
+      3: return BE3_EN;
+      4: return BE4_EN;
+      5: return BE5_EN;
+      6: return BE6_EN;
+      7: return BE7_EN;
+      8: return BE8_EN;
+      9: return BE9_EN;
+      10: return BE10_EN;
+      11: return BE11_EN;
+      12: return BE12_EN;
+      13: return BE13_EN;
+      14: return BE14_EN;
+      15: return BE15_EN;
+      16: return BE16_EN;
+      17: return BE17_EN;
+      18: return BE18_EN;
+      19: return BE19_EN;
+      20: return BE20_EN;
+      21: return BE21_EN;
+      22: return BE22_EN;
+      23: return BE23_EN;
+      24: return BE24_EN;
+      25: return BE25_EN;
+      26: return BE26_EN;
+      27: return BE27_EN;
+      28: return BE28_EN;
+      29: return BE29_EN;
+      30: return BE30_EN;
+      31: return BE31_EN;
+      32: return BE32_EN;
+      33: return BE33_EN;
+      34: return BE34_EN;
+      35: return BE35_EN;
+      36: return BE36_EN;
+      37: return BE37_EN;
+      38: return BE38_EN;
+      39: return BE39_EN;
+      40: return BE40_EN;
+      41: return BE41_EN;
+      42: return BE42_EN;
+      43: return BE43_EN;
+      44: return BE44_EN;
+      45: return BE45_EN;
+      46: return BE46_EN;
+      47: return BE47_EN;
+      48: return BE48_EN;
+      49: return BE49_EN;
+      50: return BE50_EN;
+      51: return BE51_EN;
+      52: return BE52_EN;
+      53: return BE53_EN;
+      54: return BE54_EN;
+      55: return BE55_EN;
+      56: return BE56_EN;
+      57: return BE57_EN;
+      58: return BE58_EN;
+      59: return BE59_EN;
+      60: return BE60_EN;
+      61: return BE61_EN;
+      62: return BE62_EN;
+      63: return BE63_EN;
+      default: return 0;
+    endcase
+  endfunction
 
   localparam logic [BASE_W-1:0] OVRD_BASE3 = 34'h1_2345_0000;
   localparam logic [31:0]       OVRD_SIZE3 = 32'h0002_0000;
@@ -151,12 +423,15 @@ module tb_hades_top;
   // ------------------------------------------------------------------
   // DUT <-> MIG model wiring
   // ------------------------------------------------------------------
-  logic [N_MAX-1:0]                sram_en    = '0;
-  logic [N_MAX-1:0]                sram_we    = '0;
-  logic [N_MAX-1:0][AW_DEFAULT-1:0] sram_addr  = '0;
-  logic [N_MAX-1:0][DW_DEFAULT-1:0] sram_wdata = '0;
-  logic [N_MAX-1:0][DW_DEFAULT-1:0] sram_rdata;
-  logic [N_MAX-1:0]                sram_rvalid;
+  // TB-internal packed views (runtime-indexable); the boundary assigns
+  // below map them onto the DUT's flat per-port signals (v1.1.0)
+  logic [N_MAX-1:0]                t_en    = '0;
+  logic [N_MAX-1:0]                t_we    = '0;
+  logic [N_MAX-1:0][AW_DEFAULT-1:0] t_addr  = '0;
+  logic [N_MAX-1:0][511:0]         t_wdata = '0;
+  logic [N_MAX-1:0][63:0]          t_be    = '1;
+  logic [N_MAX-1:0][511:0]         t_rdata;
+  logic [N_MAX-1:0]                t_rvalid;
 
   logic [15:0] s_axil_awaddr = 16'd0;
   logic        s_axil_awvalid = 1'b0;
@@ -219,28 +494,1435 @@ module tb_hades_top;
   logic               axi_rlast, axi_rvalid, axi_rready;
 
   logic ui_rst;
+
+  // flat per-port DUT signal declarations (v1.1.0)
+  logic sram0_en, sram0_we;
+  logic [AW_DEFAULT-1:0] sram0_addr;
+  logic [W0-1:0] sram0_wdata;
+  logic [63:0] sram0_be;
+  logic [W0-1:0] sram0_rdata;
+  logic sram0_rvalid;
+  logic sram1_en, sram1_we;
+  logic [AW_DEFAULT-1:0] sram1_addr;
+  logic [W1-1:0] sram1_wdata;
+  logic [63:0] sram1_be;
+  logic [W1-1:0] sram1_rdata;
+  logic sram1_rvalid;
+  logic sram2_en, sram2_we;
+  logic [AW_DEFAULT-1:0] sram2_addr;
+  logic [W2-1:0] sram2_wdata;
+  logic [63:0] sram2_be;
+  logic [W2-1:0] sram2_rdata;
+  logic sram2_rvalid;
+  logic sram3_en, sram3_we;
+  logic [AW_DEFAULT-1:0] sram3_addr;
+  logic [W3-1:0] sram3_wdata;
+  logic [63:0] sram3_be;
+  logic [W3-1:0] sram3_rdata;
+  logic sram3_rvalid;
+  logic sram4_en, sram4_we;
+  logic [AW_DEFAULT-1:0] sram4_addr;
+  logic [W4-1:0] sram4_wdata;
+  logic [63:0] sram4_be;
+  logic [W4-1:0] sram4_rdata;
+  logic sram4_rvalid;
+  logic sram5_en, sram5_we;
+  logic [AW_DEFAULT-1:0] sram5_addr;
+  logic [W5-1:0] sram5_wdata;
+  logic [63:0] sram5_be;
+  logic [W5-1:0] sram5_rdata;
+  logic sram5_rvalid;
+  logic sram6_en, sram6_we;
+  logic [AW_DEFAULT-1:0] sram6_addr;
+  logic [W6-1:0] sram6_wdata;
+  logic [63:0] sram6_be;
+  logic [W6-1:0] sram6_rdata;
+  logic sram6_rvalid;
+  logic sram7_en, sram7_we;
+  logic [AW_DEFAULT-1:0] sram7_addr;
+  logic [W7-1:0] sram7_wdata;
+  logic [63:0] sram7_be;
+  logic [W7-1:0] sram7_rdata;
+  logic sram7_rvalid;
+  logic sram8_en, sram8_we;
+  logic [AW_DEFAULT-1:0] sram8_addr;
+  logic [W8-1:0] sram8_wdata;
+  logic [63:0] sram8_be;
+  logic [W8-1:0] sram8_rdata;
+  logic sram8_rvalid;
+  logic sram9_en, sram9_we;
+  logic [AW_DEFAULT-1:0] sram9_addr;
+  logic [W9-1:0] sram9_wdata;
+  logic [63:0] sram9_be;
+  logic [W9-1:0] sram9_rdata;
+  logic sram9_rvalid;
+  logic sram10_en, sram10_we;
+  logic [AW_DEFAULT-1:0] sram10_addr;
+  logic [W10-1:0] sram10_wdata;
+  logic [63:0] sram10_be;
+  logic [W10-1:0] sram10_rdata;
+  logic sram10_rvalid;
+  logic sram11_en, sram11_we;
+  logic [AW_DEFAULT-1:0] sram11_addr;
+  logic [W11-1:0] sram11_wdata;
+  logic [63:0] sram11_be;
+  logic [W11-1:0] sram11_rdata;
+  logic sram11_rvalid;
+  logic sram12_en, sram12_we;
+  logic [AW_DEFAULT-1:0] sram12_addr;
+  logic [W12-1:0] sram12_wdata;
+  logic [63:0] sram12_be;
+  logic [W12-1:0] sram12_rdata;
+  logic sram12_rvalid;
+  logic sram13_en, sram13_we;
+  logic [AW_DEFAULT-1:0] sram13_addr;
+  logic [W13-1:0] sram13_wdata;
+  logic [63:0] sram13_be;
+  logic [W13-1:0] sram13_rdata;
+  logic sram13_rvalid;
+  logic sram14_en, sram14_we;
+  logic [AW_DEFAULT-1:0] sram14_addr;
+  logic [W14-1:0] sram14_wdata;
+  logic [63:0] sram14_be;
+  logic [W14-1:0] sram14_rdata;
+  logic sram14_rvalid;
+  logic sram15_en, sram15_we;
+  logic [AW_DEFAULT-1:0] sram15_addr;
+  logic [W15-1:0] sram15_wdata;
+  logic [63:0] sram15_be;
+  logic [W15-1:0] sram15_rdata;
+  logic sram15_rvalid;
+  logic sram16_en, sram16_we;
+  logic [AW_DEFAULT-1:0] sram16_addr;
+  logic [W16-1:0] sram16_wdata;
+  logic [63:0] sram16_be;
+  logic [W16-1:0] sram16_rdata;
+  logic sram16_rvalid;
+  logic sram17_en, sram17_we;
+  logic [AW_DEFAULT-1:0] sram17_addr;
+  logic [W17-1:0] sram17_wdata;
+  logic [63:0] sram17_be;
+  logic [W17-1:0] sram17_rdata;
+  logic sram17_rvalid;
+  logic sram18_en, sram18_we;
+  logic [AW_DEFAULT-1:0] sram18_addr;
+  logic [W18-1:0] sram18_wdata;
+  logic [63:0] sram18_be;
+  logic [W18-1:0] sram18_rdata;
+  logic sram18_rvalid;
+  logic sram19_en, sram19_we;
+  logic [AW_DEFAULT-1:0] sram19_addr;
+  logic [W19-1:0] sram19_wdata;
+  logic [63:0] sram19_be;
+  logic [W19-1:0] sram19_rdata;
+  logic sram19_rvalid;
+  logic sram20_en, sram20_we;
+  logic [AW_DEFAULT-1:0] sram20_addr;
+  logic [W20-1:0] sram20_wdata;
+  logic [63:0] sram20_be;
+  logic [W20-1:0] sram20_rdata;
+  logic sram20_rvalid;
+  logic sram21_en, sram21_we;
+  logic [AW_DEFAULT-1:0] sram21_addr;
+  logic [W21-1:0] sram21_wdata;
+  logic [63:0] sram21_be;
+  logic [W21-1:0] sram21_rdata;
+  logic sram21_rvalid;
+  logic sram22_en, sram22_we;
+  logic [AW_DEFAULT-1:0] sram22_addr;
+  logic [W22-1:0] sram22_wdata;
+  logic [63:0] sram22_be;
+  logic [W22-1:0] sram22_rdata;
+  logic sram22_rvalid;
+  logic sram23_en, sram23_we;
+  logic [AW_DEFAULT-1:0] sram23_addr;
+  logic [W23-1:0] sram23_wdata;
+  logic [63:0] sram23_be;
+  logic [W23-1:0] sram23_rdata;
+  logic sram23_rvalid;
+  logic sram24_en, sram24_we;
+  logic [AW_DEFAULT-1:0] sram24_addr;
+  logic [W24-1:0] sram24_wdata;
+  logic [63:0] sram24_be;
+  logic [W24-1:0] sram24_rdata;
+  logic sram24_rvalid;
+  logic sram25_en, sram25_we;
+  logic [AW_DEFAULT-1:0] sram25_addr;
+  logic [W25-1:0] sram25_wdata;
+  logic [63:0] sram25_be;
+  logic [W25-1:0] sram25_rdata;
+  logic sram25_rvalid;
+  logic sram26_en, sram26_we;
+  logic [AW_DEFAULT-1:0] sram26_addr;
+  logic [W26-1:0] sram26_wdata;
+  logic [63:0] sram26_be;
+  logic [W26-1:0] sram26_rdata;
+  logic sram26_rvalid;
+  logic sram27_en, sram27_we;
+  logic [AW_DEFAULT-1:0] sram27_addr;
+  logic [W27-1:0] sram27_wdata;
+  logic [63:0] sram27_be;
+  logic [W27-1:0] sram27_rdata;
+  logic sram27_rvalid;
+  logic sram28_en, sram28_we;
+  logic [AW_DEFAULT-1:0] sram28_addr;
+  logic [W28-1:0] sram28_wdata;
+  logic [63:0] sram28_be;
+  logic [W28-1:0] sram28_rdata;
+  logic sram28_rvalid;
+  logic sram29_en, sram29_we;
+  logic [AW_DEFAULT-1:0] sram29_addr;
+  logic [W29-1:0] sram29_wdata;
+  logic [63:0] sram29_be;
+  logic [W29-1:0] sram29_rdata;
+  logic sram29_rvalid;
+  logic sram30_en, sram30_we;
+  logic [AW_DEFAULT-1:0] sram30_addr;
+  logic [W30-1:0] sram30_wdata;
+  logic [63:0] sram30_be;
+  logic [W30-1:0] sram30_rdata;
+  logic sram30_rvalid;
+  logic sram31_en, sram31_we;
+  logic [AW_DEFAULT-1:0] sram31_addr;
+  logic [W31-1:0] sram31_wdata;
+  logic [63:0] sram31_be;
+  logic [W31-1:0] sram31_rdata;
+  logic sram31_rvalid;
+  logic sram32_en, sram32_we;
+  logic [AW_DEFAULT-1:0] sram32_addr;
+  logic [W32-1:0] sram32_wdata;
+  logic [63:0] sram32_be;
+  logic [W32-1:0] sram32_rdata;
+  logic sram32_rvalid;
+  logic sram33_en, sram33_we;
+  logic [AW_DEFAULT-1:0] sram33_addr;
+  logic [W33-1:0] sram33_wdata;
+  logic [63:0] sram33_be;
+  logic [W33-1:0] sram33_rdata;
+  logic sram33_rvalid;
+  logic sram34_en, sram34_we;
+  logic [AW_DEFAULT-1:0] sram34_addr;
+  logic [W34-1:0] sram34_wdata;
+  logic [63:0] sram34_be;
+  logic [W34-1:0] sram34_rdata;
+  logic sram34_rvalid;
+  logic sram35_en, sram35_we;
+  logic [AW_DEFAULT-1:0] sram35_addr;
+  logic [W35-1:0] sram35_wdata;
+  logic [63:0] sram35_be;
+  logic [W35-1:0] sram35_rdata;
+  logic sram35_rvalid;
+  logic sram36_en, sram36_we;
+  logic [AW_DEFAULT-1:0] sram36_addr;
+  logic [W36-1:0] sram36_wdata;
+  logic [63:0] sram36_be;
+  logic [W36-1:0] sram36_rdata;
+  logic sram36_rvalid;
+  logic sram37_en, sram37_we;
+  logic [AW_DEFAULT-1:0] sram37_addr;
+  logic [W37-1:0] sram37_wdata;
+  logic [63:0] sram37_be;
+  logic [W37-1:0] sram37_rdata;
+  logic sram37_rvalid;
+  logic sram38_en, sram38_we;
+  logic [AW_DEFAULT-1:0] sram38_addr;
+  logic [W38-1:0] sram38_wdata;
+  logic [63:0] sram38_be;
+  logic [W38-1:0] sram38_rdata;
+  logic sram38_rvalid;
+  logic sram39_en, sram39_we;
+  logic [AW_DEFAULT-1:0] sram39_addr;
+  logic [W39-1:0] sram39_wdata;
+  logic [63:0] sram39_be;
+  logic [W39-1:0] sram39_rdata;
+  logic sram39_rvalid;
+  logic sram40_en, sram40_we;
+  logic [AW_DEFAULT-1:0] sram40_addr;
+  logic [W40-1:0] sram40_wdata;
+  logic [63:0] sram40_be;
+  logic [W40-1:0] sram40_rdata;
+  logic sram40_rvalid;
+  logic sram41_en, sram41_we;
+  logic [AW_DEFAULT-1:0] sram41_addr;
+  logic [W41-1:0] sram41_wdata;
+  logic [63:0] sram41_be;
+  logic [W41-1:0] sram41_rdata;
+  logic sram41_rvalid;
+  logic sram42_en, sram42_we;
+  logic [AW_DEFAULT-1:0] sram42_addr;
+  logic [W42-1:0] sram42_wdata;
+  logic [63:0] sram42_be;
+  logic [W42-1:0] sram42_rdata;
+  logic sram42_rvalid;
+  logic sram43_en, sram43_we;
+  logic [AW_DEFAULT-1:0] sram43_addr;
+  logic [W43-1:0] sram43_wdata;
+  logic [63:0] sram43_be;
+  logic [W43-1:0] sram43_rdata;
+  logic sram43_rvalid;
+  logic sram44_en, sram44_we;
+  logic [AW_DEFAULT-1:0] sram44_addr;
+  logic [W44-1:0] sram44_wdata;
+  logic [63:0] sram44_be;
+  logic [W44-1:0] sram44_rdata;
+  logic sram44_rvalid;
+  logic sram45_en, sram45_we;
+  logic [AW_DEFAULT-1:0] sram45_addr;
+  logic [W45-1:0] sram45_wdata;
+  logic [63:0] sram45_be;
+  logic [W45-1:0] sram45_rdata;
+  logic sram45_rvalid;
+  logic sram46_en, sram46_we;
+  logic [AW_DEFAULT-1:0] sram46_addr;
+  logic [W46-1:0] sram46_wdata;
+  logic [63:0] sram46_be;
+  logic [W46-1:0] sram46_rdata;
+  logic sram46_rvalid;
+  logic sram47_en, sram47_we;
+  logic [AW_DEFAULT-1:0] sram47_addr;
+  logic [W47-1:0] sram47_wdata;
+  logic [63:0] sram47_be;
+  logic [W47-1:0] sram47_rdata;
+  logic sram47_rvalid;
+  logic sram48_en, sram48_we;
+  logic [AW_DEFAULT-1:0] sram48_addr;
+  logic [W48-1:0] sram48_wdata;
+  logic [63:0] sram48_be;
+  logic [W48-1:0] sram48_rdata;
+  logic sram48_rvalid;
+  logic sram49_en, sram49_we;
+  logic [AW_DEFAULT-1:0] sram49_addr;
+  logic [W49-1:0] sram49_wdata;
+  logic [63:0] sram49_be;
+  logic [W49-1:0] sram49_rdata;
+  logic sram49_rvalid;
+  logic sram50_en, sram50_we;
+  logic [AW_DEFAULT-1:0] sram50_addr;
+  logic [W50-1:0] sram50_wdata;
+  logic [63:0] sram50_be;
+  logic [W50-1:0] sram50_rdata;
+  logic sram50_rvalid;
+  logic sram51_en, sram51_we;
+  logic [AW_DEFAULT-1:0] sram51_addr;
+  logic [W51-1:0] sram51_wdata;
+  logic [63:0] sram51_be;
+  logic [W51-1:0] sram51_rdata;
+  logic sram51_rvalid;
+  logic sram52_en, sram52_we;
+  logic [AW_DEFAULT-1:0] sram52_addr;
+  logic [W52-1:0] sram52_wdata;
+  logic [63:0] sram52_be;
+  logic [W52-1:0] sram52_rdata;
+  logic sram52_rvalid;
+  logic sram53_en, sram53_we;
+  logic [AW_DEFAULT-1:0] sram53_addr;
+  logic [W53-1:0] sram53_wdata;
+  logic [63:0] sram53_be;
+  logic [W53-1:0] sram53_rdata;
+  logic sram53_rvalid;
+  logic sram54_en, sram54_we;
+  logic [AW_DEFAULT-1:0] sram54_addr;
+  logic [W54-1:0] sram54_wdata;
+  logic [63:0] sram54_be;
+  logic [W54-1:0] sram54_rdata;
+  logic sram54_rvalid;
+  logic sram55_en, sram55_we;
+  logic [AW_DEFAULT-1:0] sram55_addr;
+  logic [W55-1:0] sram55_wdata;
+  logic [63:0] sram55_be;
+  logic [W55-1:0] sram55_rdata;
+  logic sram55_rvalid;
+  logic sram56_en, sram56_we;
+  logic [AW_DEFAULT-1:0] sram56_addr;
+  logic [W56-1:0] sram56_wdata;
+  logic [63:0] sram56_be;
+  logic [W56-1:0] sram56_rdata;
+  logic sram56_rvalid;
+  logic sram57_en, sram57_we;
+  logic [AW_DEFAULT-1:0] sram57_addr;
+  logic [W57-1:0] sram57_wdata;
+  logic [63:0] sram57_be;
+  logic [W57-1:0] sram57_rdata;
+  logic sram57_rvalid;
+  logic sram58_en, sram58_we;
+  logic [AW_DEFAULT-1:0] sram58_addr;
+  logic [W58-1:0] sram58_wdata;
+  logic [63:0] sram58_be;
+  logic [W58-1:0] sram58_rdata;
+  logic sram58_rvalid;
+  logic sram59_en, sram59_we;
+  logic [AW_DEFAULT-1:0] sram59_addr;
+  logic [W59-1:0] sram59_wdata;
+  logic [63:0] sram59_be;
+  logic [W59-1:0] sram59_rdata;
+  logic sram59_rvalid;
+  logic sram60_en, sram60_we;
+  logic [AW_DEFAULT-1:0] sram60_addr;
+  logic [W60-1:0] sram60_wdata;
+  logic [63:0] sram60_be;
+  logic [W60-1:0] sram60_rdata;
+  logic sram60_rvalid;
+  logic sram61_en, sram61_we;
+  logic [AW_DEFAULT-1:0] sram61_addr;
+  logic [W61-1:0] sram61_wdata;
+  logic [63:0] sram61_be;
+  logic [W61-1:0] sram61_rdata;
+  logic sram61_rvalid;
+  logic sram62_en, sram62_we;
+  logic [AW_DEFAULT-1:0] sram62_addr;
+  logic [W62-1:0] sram62_wdata;
+  logic [63:0] sram62_be;
+  logic [W62-1:0] sram62_rdata;
+  logic sram62_rvalid;
+  logic sram63_en, sram63_we;
+  logic [AW_DEFAULT-1:0] sram63_addr;
+  logic [W63-1:0] sram63_wdata;
+  logic [63:0] sram63_be;
+  logic [W63-1:0] sram63_rdata;
+  logic sram63_rvalid;
+
+  // ---- DUT boundary: t_* packed views <-> flat per-port signals (generated)
+  assign sram0_en     = t_en[0];
+  assign sram0_we     = t_we[0];
+  assign sram0_addr   = t_addr[0];
+  assign sram0_wdata  = t_wdata[0][W0-1:0];
+  assign sram0_be     = t_be[0];
+  assign t_rdata[0]   = 512'(sram0_rdata);
+  assign t_rvalid[0]  = sram0_rvalid;
+  assign sram1_en     = t_en[1];
+  assign sram1_we     = t_we[1];
+  assign sram1_addr   = t_addr[1];
+  assign sram1_wdata  = t_wdata[1][W1-1:0];
+  assign sram1_be     = t_be[1];
+  assign t_rdata[1]   = 512'(sram1_rdata);
+  assign t_rvalid[1]  = sram1_rvalid;
+  assign sram2_en     = t_en[2];
+  assign sram2_we     = t_we[2];
+  assign sram2_addr   = t_addr[2];
+  assign sram2_wdata  = t_wdata[2][W2-1:0];
+  assign sram2_be     = t_be[2];
+  assign t_rdata[2]   = 512'(sram2_rdata);
+  assign t_rvalid[2]  = sram2_rvalid;
+  assign sram3_en     = t_en[3];
+  assign sram3_we     = t_we[3];
+  assign sram3_addr   = t_addr[3];
+  assign sram3_wdata  = t_wdata[3][W3-1:0];
+  assign sram3_be     = t_be[3];
+  assign t_rdata[3]   = 512'(sram3_rdata);
+  assign t_rvalid[3]  = sram3_rvalid;
+  assign sram4_en     = t_en[4];
+  assign sram4_we     = t_we[4];
+  assign sram4_addr   = t_addr[4];
+  assign sram4_wdata  = t_wdata[4][W4-1:0];
+  assign sram4_be     = t_be[4];
+  assign t_rdata[4]   = 512'(sram4_rdata);
+  assign t_rvalid[4]  = sram4_rvalid;
+  assign sram5_en     = t_en[5];
+  assign sram5_we     = t_we[5];
+  assign sram5_addr   = t_addr[5];
+  assign sram5_wdata  = t_wdata[5][W5-1:0];
+  assign sram5_be     = t_be[5];
+  assign t_rdata[5]   = 512'(sram5_rdata);
+  assign t_rvalid[5]  = sram5_rvalid;
+  assign sram6_en     = t_en[6];
+  assign sram6_we     = t_we[6];
+  assign sram6_addr   = t_addr[6];
+  assign sram6_wdata  = t_wdata[6][W6-1:0];
+  assign sram6_be     = t_be[6];
+  assign t_rdata[6]   = 512'(sram6_rdata);
+  assign t_rvalid[6]  = sram6_rvalid;
+  assign sram7_en     = t_en[7];
+  assign sram7_we     = t_we[7];
+  assign sram7_addr   = t_addr[7];
+  assign sram7_wdata  = t_wdata[7][W7-1:0];
+  assign sram7_be     = t_be[7];
+  assign t_rdata[7]   = 512'(sram7_rdata);
+  assign t_rvalid[7]  = sram7_rvalid;
+  assign sram8_en     = t_en[8];
+  assign sram8_we     = t_we[8];
+  assign sram8_addr   = t_addr[8];
+  assign sram8_wdata  = t_wdata[8][W8-1:0];
+  assign sram8_be     = t_be[8];
+  assign t_rdata[8]   = 512'(sram8_rdata);
+  assign t_rvalid[8]  = sram8_rvalid;
+  assign sram9_en     = t_en[9];
+  assign sram9_we     = t_we[9];
+  assign sram9_addr   = t_addr[9];
+  assign sram9_wdata  = t_wdata[9][W9-1:0];
+  assign sram9_be     = t_be[9];
+  assign t_rdata[9]   = 512'(sram9_rdata);
+  assign t_rvalid[9]  = sram9_rvalid;
+  assign sram10_en     = t_en[10];
+  assign sram10_we     = t_we[10];
+  assign sram10_addr   = t_addr[10];
+  assign sram10_wdata  = t_wdata[10][W10-1:0];
+  assign sram10_be     = t_be[10];
+  assign t_rdata[10]   = 512'(sram10_rdata);
+  assign t_rvalid[10]  = sram10_rvalid;
+  assign sram11_en     = t_en[11];
+  assign sram11_we     = t_we[11];
+  assign sram11_addr   = t_addr[11];
+  assign sram11_wdata  = t_wdata[11][W11-1:0];
+  assign sram11_be     = t_be[11];
+  assign t_rdata[11]   = 512'(sram11_rdata);
+  assign t_rvalid[11]  = sram11_rvalid;
+  assign sram12_en     = t_en[12];
+  assign sram12_we     = t_we[12];
+  assign sram12_addr   = t_addr[12];
+  assign sram12_wdata  = t_wdata[12][W12-1:0];
+  assign sram12_be     = t_be[12];
+  assign t_rdata[12]   = 512'(sram12_rdata);
+  assign t_rvalid[12]  = sram12_rvalid;
+  assign sram13_en     = t_en[13];
+  assign sram13_we     = t_we[13];
+  assign sram13_addr   = t_addr[13];
+  assign sram13_wdata  = t_wdata[13][W13-1:0];
+  assign sram13_be     = t_be[13];
+  assign t_rdata[13]   = 512'(sram13_rdata);
+  assign t_rvalid[13]  = sram13_rvalid;
+  assign sram14_en     = t_en[14];
+  assign sram14_we     = t_we[14];
+  assign sram14_addr   = t_addr[14];
+  assign sram14_wdata  = t_wdata[14][W14-1:0];
+  assign sram14_be     = t_be[14];
+  assign t_rdata[14]   = 512'(sram14_rdata);
+  assign t_rvalid[14]  = sram14_rvalid;
+  assign sram15_en     = t_en[15];
+  assign sram15_we     = t_we[15];
+  assign sram15_addr   = t_addr[15];
+  assign sram15_wdata  = t_wdata[15][W15-1:0];
+  assign sram15_be     = t_be[15];
+  assign t_rdata[15]   = 512'(sram15_rdata);
+  assign t_rvalid[15]  = sram15_rvalid;
+  assign sram16_en     = t_en[16];
+  assign sram16_we     = t_we[16];
+  assign sram16_addr   = t_addr[16];
+  assign sram16_wdata  = t_wdata[16][W16-1:0];
+  assign sram16_be     = t_be[16];
+  assign t_rdata[16]   = 512'(sram16_rdata);
+  assign t_rvalid[16]  = sram16_rvalid;
+  assign sram17_en     = t_en[17];
+  assign sram17_we     = t_we[17];
+  assign sram17_addr   = t_addr[17];
+  assign sram17_wdata  = t_wdata[17][W17-1:0];
+  assign sram17_be     = t_be[17];
+  assign t_rdata[17]   = 512'(sram17_rdata);
+  assign t_rvalid[17]  = sram17_rvalid;
+  assign sram18_en     = t_en[18];
+  assign sram18_we     = t_we[18];
+  assign sram18_addr   = t_addr[18];
+  assign sram18_wdata  = t_wdata[18][W18-1:0];
+  assign sram18_be     = t_be[18];
+  assign t_rdata[18]   = 512'(sram18_rdata);
+  assign t_rvalid[18]  = sram18_rvalid;
+  assign sram19_en     = t_en[19];
+  assign sram19_we     = t_we[19];
+  assign sram19_addr   = t_addr[19];
+  assign sram19_wdata  = t_wdata[19][W19-1:0];
+  assign sram19_be     = t_be[19];
+  assign t_rdata[19]   = 512'(sram19_rdata);
+  assign t_rvalid[19]  = sram19_rvalid;
+  assign sram20_en     = t_en[20];
+  assign sram20_we     = t_we[20];
+  assign sram20_addr   = t_addr[20];
+  assign sram20_wdata  = t_wdata[20][W20-1:0];
+  assign sram20_be     = t_be[20];
+  assign t_rdata[20]   = 512'(sram20_rdata);
+  assign t_rvalid[20]  = sram20_rvalid;
+  assign sram21_en     = t_en[21];
+  assign sram21_we     = t_we[21];
+  assign sram21_addr   = t_addr[21];
+  assign sram21_wdata  = t_wdata[21][W21-1:0];
+  assign sram21_be     = t_be[21];
+  assign t_rdata[21]   = 512'(sram21_rdata);
+  assign t_rvalid[21]  = sram21_rvalid;
+  assign sram22_en     = t_en[22];
+  assign sram22_we     = t_we[22];
+  assign sram22_addr   = t_addr[22];
+  assign sram22_wdata  = t_wdata[22][W22-1:0];
+  assign sram22_be     = t_be[22];
+  assign t_rdata[22]   = 512'(sram22_rdata);
+  assign t_rvalid[22]  = sram22_rvalid;
+  assign sram23_en     = t_en[23];
+  assign sram23_we     = t_we[23];
+  assign sram23_addr   = t_addr[23];
+  assign sram23_wdata  = t_wdata[23][W23-1:0];
+  assign sram23_be     = t_be[23];
+  assign t_rdata[23]   = 512'(sram23_rdata);
+  assign t_rvalid[23]  = sram23_rvalid;
+  assign sram24_en     = t_en[24];
+  assign sram24_we     = t_we[24];
+  assign sram24_addr   = t_addr[24];
+  assign sram24_wdata  = t_wdata[24][W24-1:0];
+  assign sram24_be     = t_be[24];
+  assign t_rdata[24]   = 512'(sram24_rdata);
+  assign t_rvalid[24]  = sram24_rvalid;
+  assign sram25_en     = t_en[25];
+  assign sram25_we     = t_we[25];
+  assign sram25_addr   = t_addr[25];
+  assign sram25_wdata  = t_wdata[25][W25-1:0];
+  assign sram25_be     = t_be[25];
+  assign t_rdata[25]   = 512'(sram25_rdata);
+  assign t_rvalid[25]  = sram25_rvalid;
+  assign sram26_en     = t_en[26];
+  assign sram26_we     = t_we[26];
+  assign sram26_addr   = t_addr[26];
+  assign sram26_wdata  = t_wdata[26][W26-1:0];
+  assign sram26_be     = t_be[26];
+  assign t_rdata[26]   = 512'(sram26_rdata);
+  assign t_rvalid[26]  = sram26_rvalid;
+  assign sram27_en     = t_en[27];
+  assign sram27_we     = t_we[27];
+  assign sram27_addr   = t_addr[27];
+  assign sram27_wdata  = t_wdata[27][W27-1:0];
+  assign sram27_be     = t_be[27];
+  assign t_rdata[27]   = 512'(sram27_rdata);
+  assign t_rvalid[27]  = sram27_rvalid;
+  assign sram28_en     = t_en[28];
+  assign sram28_we     = t_we[28];
+  assign sram28_addr   = t_addr[28];
+  assign sram28_wdata  = t_wdata[28][W28-1:0];
+  assign sram28_be     = t_be[28];
+  assign t_rdata[28]   = 512'(sram28_rdata);
+  assign t_rvalid[28]  = sram28_rvalid;
+  assign sram29_en     = t_en[29];
+  assign sram29_we     = t_we[29];
+  assign sram29_addr   = t_addr[29];
+  assign sram29_wdata  = t_wdata[29][W29-1:0];
+  assign sram29_be     = t_be[29];
+  assign t_rdata[29]   = 512'(sram29_rdata);
+  assign t_rvalid[29]  = sram29_rvalid;
+  assign sram30_en     = t_en[30];
+  assign sram30_we     = t_we[30];
+  assign sram30_addr   = t_addr[30];
+  assign sram30_wdata  = t_wdata[30][W30-1:0];
+  assign sram30_be     = t_be[30];
+  assign t_rdata[30]   = 512'(sram30_rdata);
+  assign t_rvalid[30]  = sram30_rvalid;
+  assign sram31_en     = t_en[31];
+  assign sram31_we     = t_we[31];
+  assign sram31_addr   = t_addr[31];
+  assign sram31_wdata  = t_wdata[31][W31-1:0];
+  assign sram31_be     = t_be[31];
+  assign t_rdata[31]   = 512'(sram31_rdata);
+  assign t_rvalid[31]  = sram31_rvalid;
+  assign sram32_en     = t_en[32];
+  assign sram32_we     = t_we[32];
+  assign sram32_addr   = t_addr[32];
+  assign sram32_wdata  = t_wdata[32][W32-1:0];
+  assign sram32_be     = t_be[32];
+  assign t_rdata[32]   = 512'(sram32_rdata);
+  assign t_rvalid[32]  = sram32_rvalid;
+  assign sram33_en     = t_en[33];
+  assign sram33_we     = t_we[33];
+  assign sram33_addr   = t_addr[33];
+  assign sram33_wdata  = t_wdata[33][W33-1:0];
+  assign sram33_be     = t_be[33];
+  assign t_rdata[33]   = 512'(sram33_rdata);
+  assign t_rvalid[33]  = sram33_rvalid;
+  assign sram34_en     = t_en[34];
+  assign sram34_we     = t_we[34];
+  assign sram34_addr   = t_addr[34];
+  assign sram34_wdata  = t_wdata[34][W34-1:0];
+  assign sram34_be     = t_be[34];
+  assign t_rdata[34]   = 512'(sram34_rdata);
+  assign t_rvalid[34]  = sram34_rvalid;
+  assign sram35_en     = t_en[35];
+  assign sram35_we     = t_we[35];
+  assign sram35_addr   = t_addr[35];
+  assign sram35_wdata  = t_wdata[35][W35-1:0];
+  assign sram35_be     = t_be[35];
+  assign t_rdata[35]   = 512'(sram35_rdata);
+  assign t_rvalid[35]  = sram35_rvalid;
+  assign sram36_en     = t_en[36];
+  assign sram36_we     = t_we[36];
+  assign sram36_addr   = t_addr[36];
+  assign sram36_wdata  = t_wdata[36][W36-1:0];
+  assign sram36_be     = t_be[36];
+  assign t_rdata[36]   = 512'(sram36_rdata);
+  assign t_rvalid[36]  = sram36_rvalid;
+  assign sram37_en     = t_en[37];
+  assign sram37_we     = t_we[37];
+  assign sram37_addr   = t_addr[37];
+  assign sram37_wdata  = t_wdata[37][W37-1:0];
+  assign sram37_be     = t_be[37];
+  assign t_rdata[37]   = 512'(sram37_rdata);
+  assign t_rvalid[37]  = sram37_rvalid;
+  assign sram38_en     = t_en[38];
+  assign sram38_we     = t_we[38];
+  assign sram38_addr   = t_addr[38];
+  assign sram38_wdata  = t_wdata[38][W38-1:0];
+  assign sram38_be     = t_be[38];
+  assign t_rdata[38]   = 512'(sram38_rdata);
+  assign t_rvalid[38]  = sram38_rvalid;
+  assign sram39_en     = t_en[39];
+  assign sram39_we     = t_we[39];
+  assign sram39_addr   = t_addr[39];
+  assign sram39_wdata  = t_wdata[39][W39-1:0];
+  assign sram39_be     = t_be[39];
+  assign t_rdata[39]   = 512'(sram39_rdata);
+  assign t_rvalid[39]  = sram39_rvalid;
+  assign sram40_en     = t_en[40];
+  assign sram40_we     = t_we[40];
+  assign sram40_addr   = t_addr[40];
+  assign sram40_wdata  = t_wdata[40][W40-1:0];
+  assign sram40_be     = t_be[40];
+  assign t_rdata[40]   = 512'(sram40_rdata);
+  assign t_rvalid[40]  = sram40_rvalid;
+  assign sram41_en     = t_en[41];
+  assign sram41_we     = t_we[41];
+  assign sram41_addr   = t_addr[41];
+  assign sram41_wdata  = t_wdata[41][W41-1:0];
+  assign sram41_be     = t_be[41];
+  assign t_rdata[41]   = 512'(sram41_rdata);
+  assign t_rvalid[41]  = sram41_rvalid;
+  assign sram42_en     = t_en[42];
+  assign sram42_we     = t_we[42];
+  assign sram42_addr   = t_addr[42];
+  assign sram42_wdata  = t_wdata[42][W42-1:0];
+  assign sram42_be     = t_be[42];
+  assign t_rdata[42]   = 512'(sram42_rdata);
+  assign t_rvalid[42]  = sram42_rvalid;
+  assign sram43_en     = t_en[43];
+  assign sram43_we     = t_we[43];
+  assign sram43_addr   = t_addr[43];
+  assign sram43_wdata  = t_wdata[43][W43-1:0];
+  assign sram43_be     = t_be[43];
+  assign t_rdata[43]   = 512'(sram43_rdata);
+  assign t_rvalid[43]  = sram43_rvalid;
+  assign sram44_en     = t_en[44];
+  assign sram44_we     = t_we[44];
+  assign sram44_addr   = t_addr[44];
+  assign sram44_wdata  = t_wdata[44][W44-1:0];
+  assign sram44_be     = t_be[44];
+  assign t_rdata[44]   = 512'(sram44_rdata);
+  assign t_rvalid[44]  = sram44_rvalid;
+  assign sram45_en     = t_en[45];
+  assign sram45_we     = t_we[45];
+  assign sram45_addr   = t_addr[45];
+  assign sram45_wdata  = t_wdata[45][W45-1:0];
+  assign sram45_be     = t_be[45];
+  assign t_rdata[45]   = 512'(sram45_rdata);
+  assign t_rvalid[45]  = sram45_rvalid;
+  assign sram46_en     = t_en[46];
+  assign sram46_we     = t_we[46];
+  assign sram46_addr   = t_addr[46];
+  assign sram46_wdata  = t_wdata[46][W46-1:0];
+  assign sram46_be     = t_be[46];
+  assign t_rdata[46]   = 512'(sram46_rdata);
+  assign t_rvalid[46]  = sram46_rvalid;
+  assign sram47_en     = t_en[47];
+  assign sram47_we     = t_we[47];
+  assign sram47_addr   = t_addr[47];
+  assign sram47_wdata  = t_wdata[47][W47-1:0];
+  assign sram47_be     = t_be[47];
+  assign t_rdata[47]   = 512'(sram47_rdata);
+  assign t_rvalid[47]  = sram47_rvalid;
+  assign sram48_en     = t_en[48];
+  assign sram48_we     = t_we[48];
+  assign sram48_addr   = t_addr[48];
+  assign sram48_wdata  = t_wdata[48][W48-1:0];
+  assign sram48_be     = t_be[48];
+  assign t_rdata[48]   = 512'(sram48_rdata);
+  assign t_rvalid[48]  = sram48_rvalid;
+  assign sram49_en     = t_en[49];
+  assign sram49_we     = t_we[49];
+  assign sram49_addr   = t_addr[49];
+  assign sram49_wdata  = t_wdata[49][W49-1:0];
+  assign sram49_be     = t_be[49];
+  assign t_rdata[49]   = 512'(sram49_rdata);
+  assign t_rvalid[49]  = sram49_rvalid;
+  assign sram50_en     = t_en[50];
+  assign sram50_we     = t_we[50];
+  assign sram50_addr   = t_addr[50];
+  assign sram50_wdata  = t_wdata[50][W50-1:0];
+  assign sram50_be     = t_be[50];
+  assign t_rdata[50]   = 512'(sram50_rdata);
+  assign t_rvalid[50]  = sram50_rvalid;
+  assign sram51_en     = t_en[51];
+  assign sram51_we     = t_we[51];
+  assign sram51_addr   = t_addr[51];
+  assign sram51_wdata  = t_wdata[51][W51-1:0];
+  assign sram51_be     = t_be[51];
+  assign t_rdata[51]   = 512'(sram51_rdata);
+  assign t_rvalid[51]  = sram51_rvalid;
+  assign sram52_en     = t_en[52];
+  assign sram52_we     = t_we[52];
+  assign sram52_addr   = t_addr[52];
+  assign sram52_wdata  = t_wdata[52][W52-1:0];
+  assign sram52_be     = t_be[52];
+  assign t_rdata[52]   = 512'(sram52_rdata);
+  assign t_rvalid[52]  = sram52_rvalid;
+  assign sram53_en     = t_en[53];
+  assign sram53_we     = t_we[53];
+  assign sram53_addr   = t_addr[53];
+  assign sram53_wdata  = t_wdata[53][W53-1:0];
+  assign sram53_be     = t_be[53];
+  assign t_rdata[53]   = 512'(sram53_rdata);
+  assign t_rvalid[53]  = sram53_rvalid;
+  assign sram54_en     = t_en[54];
+  assign sram54_we     = t_we[54];
+  assign sram54_addr   = t_addr[54];
+  assign sram54_wdata  = t_wdata[54][W54-1:0];
+  assign sram54_be     = t_be[54];
+  assign t_rdata[54]   = 512'(sram54_rdata);
+  assign t_rvalid[54]  = sram54_rvalid;
+  assign sram55_en     = t_en[55];
+  assign sram55_we     = t_we[55];
+  assign sram55_addr   = t_addr[55];
+  assign sram55_wdata  = t_wdata[55][W55-1:0];
+  assign sram55_be     = t_be[55];
+  assign t_rdata[55]   = 512'(sram55_rdata);
+  assign t_rvalid[55]  = sram55_rvalid;
+  assign sram56_en     = t_en[56];
+  assign sram56_we     = t_we[56];
+  assign sram56_addr   = t_addr[56];
+  assign sram56_wdata  = t_wdata[56][W56-1:0];
+  assign sram56_be     = t_be[56];
+  assign t_rdata[56]   = 512'(sram56_rdata);
+  assign t_rvalid[56]  = sram56_rvalid;
+  assign sram57_en     = t_en[57];
+  assign sram57_we     = t_we[57];
+  assign sram57_addr   = t_addr[57];
+  assign sram57_wdata  = t_wdata[57][W57-1:0];
+  assign sram57_be     = t_be[57];
+  assign t_rdata[57]   = 512'(sram57_rdata);
+  assign t_rvalid[57]  = sram57_rvalid;
+  assign sram58_en     = t_en[58];
+  assign sram58_we     = t_we[58];
+  assign sram58_addr   = t_addr[58];
+  assign sram58_wdata  = t_wdata[58][W58-1:0];
+  assign sram58_be     = t_be[58];
+  assign t_rdata[58]   = 512'(sram58_rdata);
+  assign t_rvalid[58]  = sram58_rvalid;
+  assign sram59_en     = t_en[59];
+  assign sram59_we     = t_we[59];
+  assign sram59_addr   = t_addr[59];
+  assign sram59_wdata  = t_wdata[59][W59-1:0];
+  assign sram59_be     = t_be[59];
+  assign t_rdata[59]   = 512'(sram59_rdata);
+  assign t_rvalid[59]  = sram59_rvalid;
+  assign sram60_en     = t_en[60];
+  assign sram60_we     = t_we[60];
+  assign sram60_addr   = t_addr[60];
+  assign sram60_wdata  = t_wdata[60][W60-1:0];
+  assign sram60_be     = t_be[60];
+  assign t_rdata[60]   = 512'(sram60_rdata);
+  assign t_rvalid[60]  = sram60_rvalid;
+  assign sram61_en     = t_en[61];
+  assign sram61_we     = t_we[61];
+  assign sram61_addr   = t_addr[61];
+  assign sram61_wdata  = t_wdata[61][W61-1:0];
+  assign sram61_be     = t_be[61];
+  assign t_rdata[61]   = 512'(sram61_rdata);
+  assign t_rvalid[61]  = sram61_rvalid;
+  assign sram62_en     = t_en[62];
+  assign sram62_we     = t_we[62];
+  assign sram62_addr   = t_addr[62];
+  assign sram62_wdata  = t_wdata[62][W62-1:0];
+  assign sram62_be     = t_be[62];
+  assign t_rdata[62]   = 512'(sram62_rdata);
+  assign t_rvalid[62]  = sram62_rvalid;
+  assign sram63_en     = t_en[63];
+  assign sram63_we     = t_we[63];
+  assign sram63_addr   = t_addr[63];
+  assign sram63_wdata  = t_wdata[63][W63-1:0];
+  assign sram63_be     = t_be[63];
+  assign t_rdata[63]   = 512'(sram63_rdata);
+  assign t_rvalid[63]  = sram63_rvalid;
+
   hades_sram_top #(
-    .N        (N_MAX),
-    .DW       (DW_DEFAULT),
+    .N        (N),
     .AW       (AW_DEFAULT),
     .IS_SYNC  (TB_SYNC),
     .CSR_EN   (TB_CSR_EN),
     .SELFTEST_EN  (TB_SELFTEST),
     .SELFTEST_BLK (16),          // short passes: fast smoke coverage
     .P_PORT_BASE (tb_base_flat()),
-    .P_PORT_SIZE (tb_size_flat())
+    .P_PORT_SIZE (tb_size_flat()),
+    .W0 (W0),
+    .W1 (W1),
+    .W2 (W2),
+    .W3 (W3),
+    .W4 (W4),
+    .W5 (W5),
+    .W6 (W6),
+    .W7 (W7),
+    .W8 (W8),
+    .W9 (W9),
+    .W10 (W10),
+    .W11 (W11),
+    .W12 (W12),
+    .W13 (W13),
+    .W14 (W14),
+    .W15 (W15),
+    .W16 (W16),
+    .W17 (W17),
+    .W18 (W18),
+    .W19 (W19),
+    .W20 (W20),
+    .W21 (W21),
+    .W22 (W22),
+    .W23 (W23),
+    .W24 (W24),
+    .W25 (W25),
+    .W26 (W26),
+    .W27 (W27),
+    .W28 (W28),
+    .W29 (W29),
+    .W30 (W30),
+    .W31 (W31),
+    .W32 (W32),
+    .W33 (W33),
+    .W34 (W34),
+    .W35 (W35),
+    .W36 (W36),
+    .W37 (W37),
+    .W38 (W38),
+    .W39 (W39),
+    .W40 (W40),
+    .W41 (W41),
+    .W42 (W42),
+    .W43 (W43),
+    .W44 (W44),
+    .W45 (W45),
+    .W46 (W46),
+    .W47 (W47),
+    .W48 (W48),
+    .W49 (W49),
+    .W50 (W50),
+    .W51 (W51),
+    .W52 (W52),
+    .W53 (W53),
+    .W54 (W54),
+    .W55 (W55),
+    .W56 (W56),
+    .W57 (W57),
+    .W58 (W58),
+    .W59 (W59),
+    .W60 (W60),
+    .W61 (W61),
+    .W62 (W62),
+    .W63 (W63),
+    .BE0_EN (BE0_EN),
+    .BE1_EN (BE1_EN),
+    .BE2_EN (BE2_EN),
+    .BE3_EN (BE3_EN),
+    .BE4_EN (BE4_EN),
+    .BE5_EN (BE5_EN),
+    .BE6_EN (BE6_EN),
+    .BE7_EN (BE7_EN),
+    .BE8_EN (BE8_EN),
+    .BE9_EN (BE9_EN),
+    .BE10_EN (BE10_EN),
+    .BE11_EN (BE11_EN),
+    .BE12_EN (BE12_EN),
+    .BE13_EN (BE13_EN),
+    .BE14_EN (BE14_EN),
+    .BE15_EN (BE15_EN),
+    .BE16_EN (BE16_EN),
+    .BE17_EN (BE17_EN),
+    .BE18_EN (BE18_EN),
+    .BE19_EN (BE19_EN),
+    .BE20_EN (BE20_EN),
+    .BE21_EN (BE21_EN),
+    .BE22_EN (BE22_EN),
+    .BE23_EN (BE23_EN),
+    .BE24_EN (BE24_EN),
+    .BE25_EN (BE25_EN),
+    .BE26_EN (BE26_EN),
+    .BE27_EN (BE27_EN),
+    .BE28_EN (BE28_EN),
+    .BE29_EN (BE29_EN),
+    .BE30_EN (BE30_EN),
+    .BE31_EN (BE31_EN),
+    .BE32_EN (BE32_EN),
+    .BE33_EN (BE33_EN),
+    .BE34_EN (BE34_EN),
+    .BE35_EN (BE35_EN),
+    .BE36_EN (BE36_EN),
+    .BE37_EN (BE37_EN),
+    .BE38_EN (BE38_EN),
+    .BE39_EN (BE39_EN),
+    .BE40_EN (BE40_EN),
+    .BE41_EN (BE41_EN),
+    .BE42_EN (BE42_EN),
+    .BE43_EN (BE43_EN),
+    .BE44_EN (BE44_EN),
+    .BE45_EN (BE45_EN),
+    .BE46_EN (BE46_EN),
+    .BE47_EN (BE47_EN),
+    .BE48_EN (BE48_EN),
+    .BE49_EN (BE49_EN),
+    .BE50_EN (BE50_EN),
+    .BE51_EN (BE51_EN),
+    .BE52_EN (BE52_EN),
+    .BE53_EN (BE53_EN),
+    .BE54_EN (BE54_EN),
+    .BE55_EN (BE55_EN),
+    .BE56_EN (BE56_EN),
+    .BE57_EN (BE57_EN),
+    .BE58_EN (BE58_EN),
+    .BE59_EN (BE59_EN),
+    .BE60_EN (BE60_EN),
+    .BE61_EN (BE61_EN),
+    .BE62_EN (BE62_EN),
+    .BE63_EN (BE63_EN)
   ) dut (
     .ui_clk         (ui_clk),
     .ui_rst_n       (ui_rst_n),
     .port_clk       (port_clk),
     .port_rst_n     (port_rst_n),
     .calib_done     (calib_done),
-    .sram_en        (sram_en),
-    .sram_we        (sram_we),
-    .sram_addr      (sram_addr),
-    .sram_wdata     (sram_wdata),
-    .sram_rdata     (sram_rdata),
-    .sram_rvalid    (sram_rvalid),
+    .sram0_en     (sram0_en),
+    .sram0_we     (sram0_we),
+    .sram0_addr   (sram0_addr),
+    .sram0_wdata  (sram0_wdata),
+    .sram0_be     (sram0_be),
+    .sram0_rdata  (sram0_rdata),
+    .sram0_rvalid (sram0_rvalid),
+    .sram1_en     (sram1_en),
+    .sram1_we     (sram1_we),
+    .sram1_addr   (sram1_addr),
+    .sram1_wdata  (sram1_wdata),
+    .sram1_be     (sram1_be),
+    .sram1_rdata  (sram1_rdata),
+    .sram1_rvalid (sram1_rvalid),
+    .sram2_en     (sram2_en),
+    .sram2_we     (sram2_we),
+    .sram2_addr   (sram2_addr),
+    .sram2_wdata  (sram2_wdata),
+    .sram2_be     (sram2_be),
+    .sram2_rdata  (sram2_rdata),
+    .sram2_rvalid (sram2_rvalid),
+    .sram3_en     (sram3_en),
+    .sram3_we     (sram3_we),
+    .sram3_addr   (sram3_addr),
+    .sram3_wdata  (sram3_wdata),
+    .sram3_be     (sram3_be),
+    .sram3_rdata  (sram3_rdata),
+    .sram3_rvalid (sram3_rvalid),
+    .sram4_en     (sram4_en),
+    .sram4_we     (sram4_we),
+    .sram4_addr   (sram4_addr),
+    .sram4_wdata  (sram4_wdata),
+    .sram4_be     (sram4_be),
+    .sram4_rdata  (sram4_rdata),
+    .sram4_rvalid (sram4_rvalid),
+    .sram5_en     (sram5_en),
+    .sram5_we     (sram5_we),
+    .sram5_addr   (sram5_addr),
+    .sram5_wdata  (sram5_wdata),
+    .sram5_be     (sram5_be),
+    .sram5_rdata  (sram5_rdata),
+    .sram5_rvalid (sram5_rvalid),
+    .sram6_en     (sram6_en),
+    .sram6_we     (sram6_we),
+    .sram6_addr   (sram6_addr),
+    .sram6_wdata  (sram6_wdata),
+    .sram6_be     (sram6_be),
+    .sram6_rdata  (sram6_rdata),
+    .sram6_rvalid (sram6_rvalid),
+    .sram7_en     (sram7_en),
+    .sram7_we     (sram7_we),
+    .sram7_addr   (sram7_addr),
+    .sram7_wdata  (sram7_wdata),
+    .sram7_be     (sram7_be),
+    .sram7_rdata  (sram7_rdata),
+    .sram7_rvalid (sram7_rvalid),
+    .sram8_en     (sram8_en),
+    .sram8_we     (sram8_we),
+    .sram8_addr   (sram8_addr),
+    .sram8_wdata  (sram8_wdata),
+    .sram8_be     (sram8_be),
+    .sram8_rdata  (sram8_rdata),
+    .sram8_rvalid (sram8_rvalid),
+    .sram9_en     (sram9_en),
+    .sram9_we     (sram9_we),
+    .sram9_addr   (sram9_addr),
+    .sram9_wdata  (sram9_wdata),
+    .sram9_be     (sram9_be),
+    .sram9_rdata  (sram9_rdata),
+    .sram9_rvalid (sram9_rvalid),
+    .sram10_en     (sram10_en),
+    .sram10_we     (sram10_we),
+    .sram10_addr   (sram10_addr),
+    .sram10_wdata  (sram10_wdata),
+    .sram10_be     (sram10_be),
+    .sram10_rdata  (sram10_rdata),
+    .sram10_rvalid (sram10_rvalid),
+    .sram11_en     (sram11_en),
+    .sram11_we     (sram11_we),
+    .sram11_addr   (sram11_addr),
+    .sram11_wdata  (sram11_wdata),
+    .sram11_be     (sram11_be),
+    .sram11_rdata  (sram11_rdata),
+    .sram11_rvalid (sram11_rvalid),
+    .sram12_en     (sram12_en),
+    .sram12_we     (sram12_we),
+    .sram12_addr   (sram12_addr),
+    .sram12_wdata  (sram12_wdata),
+    .sram12_be     (sram12_be),
+    .sram12_rdata  (sram12_rdata),
+    .sram12_rvalid (sram12_rvalid),
+    .sram13_en     (sram13_en),
+    .sram13_we     (sram13_we),
+    .sram13_addr   (sram13_addr),
+    .sram13_wdata  (sram13_wdata),
+    .sram13_be     (sram13_be),
+    .sram13_rdata  (sram13_rdata),
+    .sram13_rvalid (sram13_rvalid),
+    .sram14_en     (sram14_en),
+    .sram14_we     (sram14_we),
+    .sram14_addr   (sram14_addr),
+    .sram14_wdata  (sram14_wdata),
+    .sram14_be     (sram14_be),
+    .sram14_rdata  (sram14_rdata),
+    .sram14_rvalid (sram14_rvalid),
+    .sram15_en     (sram15_en),
+    .sram15_we     (sram15_we),
+    .sram15_addr   (sram15_addr),
+    .sram15_wdata  (sram15_wdata),
+    .sram15_be     (sram15_be),
+    .sram15_rdata  (sram15_rdata),
+    .sram15_rvalid (sram15_rvalid),
+    .sram16_en     (sram16_en),
+    .sram16_we     (sram16_we),
+    .sram16_addr   (sram16_addr),
+    .sram16_wdata  (sram16_wdata),
+    .sram16_be     (sram16_be),
+    .sram16_rdata  (sram16_rdata),
+    .sram16_rvalid (sram16_rvalid),
+    .sram17_en     (sram17_en),
+    .sram17_we     (sram17_we),
+    .sram17_addr   (sram17_addr),
+    .sram17_wdata  (sram17_wdata),
+    .sram17_be     (sram17_be),
+    .sram17_rdata  (sram17_rdata),
+    .sram17_rvalid (sram17_rvalid),
+    .sram18_en     (sram18_en),
+    .sram18_we     (sram18_we),
+    .sram18_addr   (sram18_addr),
+    .sram18_wdata  (sram18_wdata),
+    .sram18_be     (sram18_be),
+    .sram18_rdata  (sram18_rdata),
+    .sram18_rvalid (sram18_rvalid),
+    .sram19_en     (sram19_en),
+    .sram19_we     (sram19_we),
+    .sram19_addr   (sram19_addr),
+    .sram19_wdata  (sram19_wdata),
+    .sram19_be     (sram19_be),
+    .sram19_rdata  (sram19_rdata),
+    .sram19_rvalid (sram19_rvalid),
+    .sram20_en     (sram20_en),
+    .sram20_we     (sram20_we),
+    .sram20_addr   (sram20_addr),
+    .sram20_wdata  (sram20_wdata),
+    .sram20_be     (sram20_be),
+    .sram20_rdata  (sram20_rdata),
+    .sram20_rvalid (sram20_rvalid),
+    .sram21_en     (sram21_en),
+    .sram21_we     (sram21_we),
+    .sram21_addr   (sram21_addr),
+    .sram21_wdata  (sram21_wdata),
+    .sram21_be     (sram21_be),
+    .sram21_rdata  (sram21_rdata),
+    .sram21_rvalid (sram21_rvalid),
+    .sram22_en     (sram22_en),
+    .sram22_we     (sram22_we),
+    .sram22_addr   (sram22_addr),
+    .sram22_wdata  (sram22_wdata),
+    .sram22_be     (sram22_be),
+    .sram22_rdata  (sram22_rdata),
+    .sram22_rvalid (sram22_rvalid),
+    .sram23_en     (sram23_en),
+    .sram23_we     (sram23_we),
+    .sram23_addr   (sram23_addr),
+    .sram23_wdata  (sram23_wdata),
+    .sram23_be     (sram23_be),
+    .sram23_rdata  (sram23_rdata),
+    .sram23_rvalid (sram23_rvalid),
+    .sram24_en     (sram24_en),
+    .sram24_we     (sram24_we),
+    .sram24_addr   (sram24_addr),
+    .sram24_wdata  (sram24_wdata),
+    .sram24_be     (sram24_be),
+    .sram24_rdata  (sram24_rdata),
+    .sram24_rvalid (sram24_rvalid),
+    .sram25_en     (sram25_en),
+    .sram25_we     (sram25_we),
+    .sram25_addr   (sram25_addr),
+    .sram25_wdata  (sram25_wdata),
+    .sram25_be     (sram25_be),
+    .sram25_rdata  (sram25_rdata),
+    .sram25_rvalid (sram25_rvalid),
+    .sram26_en     (sram26_en),
+    .sram26_we     (sram26_we),
+    .sram26_addr   (sram26_addr),
+    .sram26_wdata  (sram26_wdata),
+    .sram26_be     (sram26_be),
+    .sram26_rdata  (sram26_rdata),
+    .sram26_rvalid (sram26_rvalid),
+    .sram27_en     (sram27_en),
+    .sram27_we     (sram27_we),
+    .sram27_addr   (sram27_addr),
+    .sram27_wdata  (sram27_wdata),
+    .sram27_be     (sram27_be),
+    .sram27_rdata  (sram27_rdata),
+    .sram27_rvalid (sram27_rvalid),
+    .sram28_en     (sram28_en),
+    .sram28_we     (sram28_we),
+    .sram28_addr   (sram28_addr),
+    .sram28_wdata  (sram28_wdata),
+    .sram28_be     (sram28_be),
+    .sram28_rdata  (sram28_rdata),
+    .sram28_rvalid (sram28_rvalid),
+    .sram29_en     (sram29_en),
+    .sram29_we     (sram29_we),
+    .sram29_addr   (sram29_addr),
+    .sram29_wdata  (sram29_wdata),
+    .sram29_be     (sram29_be),
+    .sram29_rdata  (sram29_rdata),
+    .sram29_rvalid (sram29_rvalid),
+    .sram30_en     (sram30_en),
+    .sram30_we     (sram30_we),
+    .sram30_addr   (sram30_addr),
+    .sram30_wdata  (sram30_wdata),
+    .sram30_be     (sram30_be),
+    .sram30_rdata  (sram30_rdata),
+    .sram30_rvalid (sram30_rvalid),
+    .sram31_en     (sram31_en),
+    .sram31_we     (sram31_we),
+    .sram31_addr   (sram31_addr),
+    .sram31_wdata  (sram31_wdata),
+    .sram31_be     (sram31_be),
+    .sram31_rdata  (sram31_rdata),
+    .sram31_rvalid (sram31_rvalid),
+    .sram32_en     (sram32_en),
+    .sram32_we     (sram32_we),
+    .sram32_addr   (sram32_addr),
+    .sram32_wdata  (sram32_wdata),
+    .sram32_be     (sram32_be),
+    .sram32_rdata  (sram32_rdata),
+    .sram32_rvalid (sram32_rvalid),
+    .sram33_en     (sram33_en),
+    .sram33_we     (sram33_we),
+    .sram33_addr   (sram33_addr),
+    .sram33_wdata  (sram33_wdata),
+    .sram33_be     (sram33_be),
+    .sram33_rdata  (sram33_rdata),
+    .sram33_rvalid (sram33_rvalid),
+    .sram34_en     (sram34_en),
+    .sram34_we     (sram34_we),
+    .sram34_addr   (sram34_addr),
+    .sram34_wdata  (sram34_wdata),
+    .sram34_be     (sram34_be),
+    .sram34_rdata  (sram34_rdata),
+    .sram34_rvalid (sram34_rvalid),
+    .sram35_en     (sram35_en),
+    .sram35_we     (sram35_we),
+    .sram35_addr   (sram35_addr),
+    .sram35_wdata  (sram35_wdata),
+    .sram35_be     (sram35_be),
+    .sram35_rdata  (sram35_rdata),
+    .sram35_rvalid (sram35_rvalid),
+    .sram36_en     (sram36_en),
+    .sram36_we     (sram36_we),
+    .sram36_addr   (sram36_addr),
+    .sram36_wdata  (sram36_wdata),
+    .sram36_be     (sram36_be),
+    .sram36_rdata  (sram36_rdata),
+    .sram36_rvalid (sram36_rvalid),
+    .sram37_en     (sram37_en),
+    .sram37_we     (sram37_we),
+    .sram37_addr   (sram37_addr),
+    .sram37_wdata  (sram37_wdata),
+    .sram37_be     (sram37_be),
+    .sram37_rdata  (sram37_rdata),
+    .sram37_rvalid (sram37_rvalid),
+    .sram38_en     (sram38_en),
+    .sram38_we     (sram38_we),
+    .sram38_addr   (sram38_addr),
+    .sram38_wdata  (sram38_wdata),
+    .sram38_be     (sram38_be),
+    .sram38_rdata  (sram38_rdata),
+    .sram38_rvalid (sram38_rvalid),
+    .sram39_en     (sram39_en),
+    .sram39_we     (sram39_we),
+    .sram39_addr   (sram39_addr),
+    .sram39_wdata  (sram39_wdata),
+    .sram39_be     (sram39_be),
+    .sram39_rdata  (sram39_rdata),
+    .sram39_rvalid (sram39_rvalid),
+    .sram40_en     (sram40_en),
+    .sram40_we     (sram40_we),
+    .sram40_addr   (sram40_addr),
+    .sram40_wdata  (sram40_wdata),
+    .sram40_be     (sram40_be),
+    .sram40_rdata  (sram40_rdata),
+    .sram40_rvalid (sram40_rvalid),
+    .sram41_en     (sram41_en),
+    .sram41_we     (sram41_we),
+    .sram41_addr   (sram41_addr),
+    .sram41_wdata  (sram41_wdata),
+    .sram41_be     (sram41_be),
+    .sram41_rdata  (sram41_rdata),
+    .sram41_rvalid (sram41_rvalid),
+    .sram42_en     (sram42_en),
+    .sram42_we     (sram42_we),
+    .sram42_addr   (sram42_addr),
+    .sram42_wdata  (sram42_wdata),
+    .sram42_be     (sram42_be),
+    .sram42_rdata  (sram42_rdata),
+    .sram42_rvalid (sram42_rvalid),
+    .sram43_en     (sram43_en),
+    .sram43_we     (sram43_we),
+    .sram43_addr   (sram43_addr),
+    .sram43_wdata  (sram43_wdata),
+    .sram43_be     (sram43_be),
+    .sram43_rdata  (sram43_rdata),
+    .sram43_rvalid (sram43_rvalid),
+    .sram44_en     (sram44_en),
+    .sram44_we     (sram44_we),
+    .sram44_addr   (sram44_addr),
+    .sram44_wdata  (sram44_wdata),
+    .sram44_be     (sram44_be),
+    .sram44_rdata  (sram44_rdata),
+    .sram44_rvalid (sram44_rvalid),
+    .sram45_en     (sram45_en),
+    .sram45_we     (sram45_we),
+    .sram45_addr   (sram45_addr),
+    .sram45_wdata  (sram45_wdata),
+    .sram45_be     (sram45_be),
+    .sram45_rdata  (sram45_rdata),
+    .sram45_rvalid (sram45_rvalid),
+    .sram46_en     (sram46_en),
+    .sram46_we     (sram46_we),
+    .sram46_addr   (sram46_addr),
+    .sram46_wdata  (sram46_wdata),
+    .sram46_be     (sram46_be),
+    .sram46_rdata  (sram46_rdata),
+    .sram46_rvalid (sram46_rvalid),
+    .sram47_en     (sram47_en),
+    .sram47_we     (sram47_we),
+    .sram47_addr   (sram47_addr),
+    .sram47_wdata  (sram47_wdata),
+    .sram47_be     (sram47_be),
+    .sram47_rdata  (sram47_rdata),
+    .sram47_rvalid (sram47_rvalid),
+    .sram48_en     (sram48_en),
+    .sram48_we     (sram48_we),
+    .sram48_addr   (sram48_addr),
+    .sram48_wdata  (sram48_wdata),
+    .sram48_be     (sram48_be),
+    .sram48_rdata  (sram48_rdata),
+    .sram48_rvalid (sram48_rvalid),
+    .sram49_en     (sram49_en),
+    .sram49_we     (sram49_we),
+    .sram49_addr   (sram49_addr),
+    .sram49_wdata  (sram49_wdata),
+    .sram49_be     (sram49_be),
+    .sram49_rdata  (sram49_rdata),
+    .sram49_rvalid (sram49_rvalid),
+    .sram50_en     (sram50_en),
+    .sram50_we     (sram50_we),
+    .sram50_addr   (sram50_addr),
+    .sram50_wdata  (sram50_wdata),
+    .sram50_be     (sram50_be),
+    .sram50_rdata  (sram50_rdata),
+    .sram50_rvalid (sram50_rvalid),
+    .sram51_en     (sram51_en),
+    .sram51_we     (sram51_we),
+    .sram51_addr   (sram51_addr),
+    .sram51_wdata  (sram51_wdata),
+    .sram51_be     (sram51_be),
+    .sram51_rdata  (sram51_rdata),
+    .sram51_rvalid (sram51_rvalid),
+    .sram52_en     (sram52_en),
+    .sram52_we     (sram52_we),
+    .sram52_addr   (sram52_addr),
+    .sram52_wdata  (sram52_wdata),
+    .sram52_be     (sram52_be),
+    .sram52_rdata  (sram52_rdata),
+    .sram52_rvalid (sram52_rvalid),
+    .sram53_en     (sram53_en),
+    .sram53_we     (sram53_we),
+    .sram53_addr   (sram53_addr),
+    .sram53_wdata  (sram53_wdata),
+    .sram53_be     (sram53_be),
+    .sram53_rdata  (sram53_rdata),
+    .sram53_rvalid (sram53_rvalid),
+    .sram54_en     (sram54_en),
+    .sram54_we     (sram54_we),
+    .sram54_addr   (sram54_addr),
+    .sram54_wdata  (sram54_wdata),
+    .sram54_be     (sram54_be),
+    .sram54_rdata  (sram54_rdata),
+    .sram54_rvalid (sram54_rvalid),
+    .sram55_en     (sram55_en),
+    .sram55_we     (sram55_we),
+    .sram55_addr   (sram55_addr),
+    .sram55_wdata  (sram55_wdata),
+    .sram55_be     (sram55_be),
+    .sram55_rdata  (sram55_rdata),
+    .sram55_rvalid (sram55_rvalid),
+    .sram56_en     (sram56_en),
+    .sram56_we     (sram56_we),
+    .sram56_addr   (sram56_addr),
+    .sram56_wdata  (sram56_wdata),
+    .sram56_be     (sram56_be),
+    .sram56_rdata  (sram56_rdata),
+    .sram56_rvalid (sram56_rvalid),
+    .sram57_en     (sram57_en),
+    .sram57_we     (sram57_we),
+    .sram57_addr   (sram57_addr),
+    .sram57_wdata  (sram57_wdata),
+    .sram57_be     (sram57_be),
+    .sram57_rdata  (sram57_rdata),
+    .sram57_rvalid (sram57_rvalid),
+    .sram58_en     (sram58_en),
+    .sram58_we     (sram58_we),
+    .sram58_addr   (sram58_addr),
+    .sram58_wdata  (sram58_wdata),
+    .sram58_be     (sram58_be),
+    .sram58_rdata  (sram58_rdata),
+    .sram58_rvalid (sram58_rvalid),
+    .sram59_en     (sram59_en),
+    .sram59_we     (sram59_we),
+    .sram59_addr   (sram59_addr),
+    .sram59_wdata  (sram59_wdata),
+    .sram59_be     (sram59_be),
+    .sram59_rdata  (sram59_rdata),
+    .sram59_rvalid (sram59_rvalid),
+    .sram60_en     (sram60_en),
+    .sram60_we     (sram60_we),
+    .sram60_addr   (sram60_addr),
+    .sram60_wdata  (sram60_wdata),
+    .sram60_be     (sram60_be),
+    .sram60_rdata  (sram60_rdata),
+    .sram60_rvalid (sram60_rvalid),
+    .sram61_en     (sram61_en),
+    .sram61_we     (sram61_we),
+    .sram61_addr   (sram61_addr),
+    .sram61_wdata  (sram61_wdata),
+    .sram61_be     (sram61_be),
+    .sram61_rdata  (sram61_rdata),
+    .sram61_rvalid (sram61_rvalid),
+    .sram62_en     (sram62_en),
+    .sram62_we     (sram62_we),
+    .sram62_addr   (sram62_addr),
+    .sram62_wdata  (sram62_wdata),
+    .sram62_be     (sram62_be),
+    .sram62_rdata  (sram62_rdata),
+    .sram62_rvalid (sram62_rvalid),
+    .sram63_en     (sram63_en),
+    .sram63_we     (sram63_we),
+    .sram63_addr   (sram63_addr),
+    .sram63_wdata  (sram63_wdata),
+    .sram63_be     (sram63_be),
+    .sram63_rdata  (sram63_rdata),
+    .sram63_rvalid (sram63_rvalid),
+
     .m_axi_awid     (axi_awid),
     .m_axi_awaddr   (axi_awaddr),
     .m_axi_awlen    (axi_awlen),
@@ -355,14 +2037,16 @@ module tb_hades_top;
   import "DPI-C" context function longint  hades_exp_params(int is_sync, int ui_mhz,
                                                            int port_mib, int dw, int n_max);
   import "DPI-C" context function void     hades_set_port_cfg(int port, longint base, int size);
+  import "DPI-C" context function void     hades_set_port_width(int port, int bits);
   import "DPI-C" context function longint  hades_exp_base(int port);
   import "DPI-C" context function int      hades_exp_size(int port);
-  import "DPI-C" context function void     hades_mem_write(int port, int addr, int data);
+  import "DPI-C" context function void     hades_mem_write(int port, int addr, bit [511:0] data);
+  import "DPI-C" context function void     hades_mem_write_be(int port, int addr, bit [511:0] data, longint be);
   import "DPI-C" context function void     hades_read_expect(int port, longint due_cycle, int addr);
   import "DPI-C" context function void     hades_read_expect0(int port, longint due_cycle);
   import "DPI-C" context function void     hades_read_expect_late(int port, longint due_cycle);
   import "DPI-C" context function void     hades_port_edge(int port, longint cycle,
-                                                           int rvalid, int rdata);
+                                                           int rvalid, bit [511:0] rdata);
   import "DPI-C" context function void     hades_check_eq(string what, longint got, longint exp);
   import "DPI-C" context function void     hades_check_range(string what, longint got,
                                                              longint lo, longint hi);
@@ -440,12 +2124,12 @@ module tb_hades_top;
     #(0.001);   // 1 ps after the edge: post-NBA sample
     pcycle = pcycle + 1;
     for (int p = 0; p < N_MAX; p++) begin
-      if ($isunknown(sram_rvalid[p]) ||
-          (!expect_sentinel && sram_rvalid[p] === 1'b1 && $isunknown(sram_rdata[p])))
+      if ($isunknown(t_rvalid[p]) ||
+          (!expect_sentinel && t_rvalid[p] === 1'b1 && $isunknown(t_rdata[p])))
         hades_fail($sformatf("X on port %0d outputs at pcycle %0d (rvalid=%b rdata=%h)",
-                             p, pcycle, sram_rvalid[p], sram_rdata[p]));
-      hades_port_edge(p, pcycle, (sram_rvalid[p] === 1'b1) ? 1 : 0,
-                      32'(sram_rdata[p]));
+                             p, pcycle, t_rvalid[p], t_rdata[p]));
+      hades_port_edge(p, pcycle, (t_rvalid[p] === 1'b1) ? 1 : 0,
+                      t_rdata[p]);
     end
   end
 
@@ -454,64 +2138,80 @@ module tb_hades_top;
   // ------------------------------------------------------------------
   int cur_lat = 2;   // TB's view of the active L
 
-  task automatic sram_write(input int port, input int addr, input int data);
+  task automatic sram_write(input int port, input int addr, input bit [511:0] data);
     @(negedge port_clk);
-    sram_en[port]    <= 1'b1;
-    sram_we[port]    <= 1'b1;
-    sram_addr[port]  <= addr;
-    sram_wdata[port] <= data;
+    t_en[port]    <= 1'b1;
+    t_we[port]    <= 1'b1;
+    t_addr[port]  <= addr;
+    t_wdata[port] <= data;
     hades_mem_write(port, addr, data);
     @(negedge port_clk);
-    sram_en[port]    <= 1'b0;
+    t_en[port]    <= 1'b0;
+  endtask
+
+  // byte-enabled write (v1.1.0): drives t_be with the word (ports with
+  // BE<i>_EN=0 ignore it) and merges enabled bytes in the expected model
+  task automatic sram_write_be(input int port, input int addr,
+                               input bit [511:0] data, input bit [63:0] be);
+    @(negedge port_clk);
+    t_en[port]    <= 1'b1;
+    t_we[port]    <= 1'b1;
+    t_addr[port]  <= addr;
+    t_wdata[port] <= data;
+    t_be[port]    <= be;
+    hades_mem_write_be(port, addr, data, be);
+    @(negedge port_clk);
+    t_en[port]    <= 1'b0;
+    t_be[port]    <= '1;
   endtask
 
   task automatic sram_read(input int port, input int addr);
     @(negedge port_clk);
-    sram_en[port]    <= 1'b1;
-    sram_we[port]    <= 1'b0;
-    sram_addr[port]  <= addr;
+    t_en[port]    <= 1'b1;
+    t_we[port]    <= 1'b0;
+    t_addr[port]  <= addr;
     hades_read_expect(port, pcycle + 1 + cur_lat, addr);
     @(negedge port_clk);
-    sram_en[port]    <= 1'b0;
+    t_en[port]    <= 1'b0;
   endtask
 
   // fully back-to-back read burst (one read every port period)
   task automatic sram_read_burst(input int port, input int n, input int addr0);
     for (int k = 0; k < n; k++) begin
       @(negedge port_clk);
-      sram_en[port]   <= 1'b1;
-      sram_we[port]   <= 1'b0;
-      sram_addr[port] <= addr0 + k;
+      t_en[port]   <= 1'b1;
+      t_we[port]   <= 1'b0;
+      t_addr[port] <= addr0 + k;
       hades_read_expect(port, pcycle + 1 + cur_lat, addr0 + k);
     end
     @(negedge port_clk);
-    sram_en[port] <= 1'b0;
+    t_en[port] <= 1'b0;
   endtask
 
   // fully back-to-back write burst
   task automatic sram_write_burst(input int port, input int n, input int addr0,
-                                  input int data0);
+                                  input bit [511:0] data0);
     for (int k = 0; k < n; k++) begin
       @(negedge port_clk);
-      sram_en[port]   <= 1'b1;
-      sram_we[port]   <= 1'b1;
-      sram_addr[port] <= addr0 + k;
-      sram_wdata[port] <= data0 + k;
+      t_en[port]   <= 1'b1;
+      t_we[port]   <= 1'b1;
+      t_addr[port] <= addr0 + k;
+      t_wdata[port] <= data0 + k;
       hades_mem_write(port, addr0 + k, data0 + k);
     end
     @(negedge port_clk);
-    sram_en[port] <= 1'b0;
+    t_en[port] <= 1'b0;
   endtask
 
   // read to an illegal address: synthetic zero response, still on schedule
   task automatic sram_read_illegal(input int port, input int addr);
     @(negedge port_clk);
-    sram_en[port]    <= 1'b1;
-    sram_we[port]    <= 1'b0;
-    sram_addr[port]  <= addr;
+    t_en[port]    <= 1'b1;
+    t_we[port]    <= 1'b0;
+    t_addr[port]  <= addr;
     hades_read_expect0(port, pcycle + 1 + cur_lat);
     @(negedge port_clk);
-    sram_en[port]    <= 1'b0;
+    t_en[port]    <= 1'b0;
   endtask
 
   // let all outstanding reads release
@@ -800,13 +2500,13 @@ module tb_hades_top;
         drain();
         // RAW: write then read same address on adjacent cycles
         @(negedge port_clk);
-        sram_en[0] <= 1'b1; sram_we[0] <= 1'b1; sram_addr[0] <= 32'h777; sram_wdata[0] <= 32'hDEAD_1234;
+        t_en[0] <= 1'b1; t_we[0] <= 1'b1; t_addr[0] <= 32'h777; t_wdata[0] <= 32'hDEAD_1234;
         hades_mem_write(0, 32'h777, 32'hDEAD_1234);
         @(negedge port_clk);
-        sram_en[0] <= 1'b1; sram_we[0] <= 1'b0; sram_addr[0] <= 32'h777;
+        t_en[0] <= 1'b1; t_we[0] <= 1'b0; t_addr[0] <= 32'h777;
         hades_read_expect(0, pcycle + 1 + cur_lat, 32'h777);
         @(negedge port_clk);
-        sram_en[0] <= 1'b0;
+        t_en[0] <= 1'b0;
         drain();
       end
       axil_wr(CSR_CTRL, 32'h0);
@@ -891,10 +2591,10 @@ module tb_hades_top;
       sram_write(0, 32'h300, 32'h5AFE_0001);
       for (int k = 0; k < 3; k++) begin
         @(negedge port_clk);
-        sram_en[0] <= 1'b1; sram_we[0] <= 1'b0; sram_addr[0] <= 32'h300 + k;
+        t_en[0] <= 1'b1; t_we[0] <= 1'b0; t_addr[0] <= 32'h300 + k;
         hades_read_expect_late(0, pcycle + 1 + 2);
         @(negedge port_clk);
-        sram_en[0] <= 1'b0;
+        t_en[0] <= 1'b0;
         @(negedge port_clk);
       end
       drain();
@@ -910,10 +2610,10 @@ module tb_hades_top;
       sram_write(0, 32'h300, 32'h5AFE_0001);
       for (int k = 0; k < 3; k++) begin
         @(negedge port_clk);
-        sram_en[0] <= 1'b1; sram_we[0] <= 1'b0; sram_addr[0] <= 32'h300 + k;
+        t_en[0] <= 1'b1; t_we[0] <= 1'b0; t_addr[0] <= 32'h300 + k;
         hades_read_expect_late(0, pcycle + 1 + cur_lat);
         @(negedge port_clk);
-        sram_en[0] <= 1'b0;
+        t_en[0] <= 1'b0;
         @(negedge port_clk);
       end
       drain();
@@ -962,18 +2662,18 @@ module tb_hades_top;
       // it.  (In the plain static map every 22-bit address is legal by
       // construction, so bit0 is exercised here and in the CSR variants.)
       @(negedge port_clk);
-      sram_en[3] <= 1'b1; sram_we[3] <= 1'b0; sram_addr[3] <= 32'h0002_0000;
+      t_en[3] <= 1'b1; t_we[3] <= 1'b0; t_addr[3] <= 32'h0002_0000;
       hades_read_expect0(3, pcycle + 1 + cur_lat);
       @(negedge port_clk);
-      sram_en[3] <= 1'b0;
+      t_en[3] <= 1'b0;
       drain();
 `endif
       // timeout: the dropped read completes as scheduled zeros
       @(negedge port_clk);
-      sram_en[0] <= 1'b1; sram_we[0] <= 1'b0; sram_addr[0] <= 32'h0007_7777;
+      t_en[0] <= 1'b1; t_we[0] <= 1'b0; t_addr[0] <= 32'h0007_7777;
       hades_read_expect0(0, pcycle + 1 + cur_lat);
       @(negedge port_clk);
-      sram_en[0] <= 1'b0;
+      t_en[0] <= 1'b0;
       drain();
       // SLVERR read (real data + error flag) and SLVERR write (applied,
       // then flagged on B)
@@ -1022,10 +2722,10 @@ module tb_hades_top;
 
       // (2b) illegal WRITE: discarded silently (posted), same bit0
       @(negedge port_clk);
-      sram_en[0] <= 1'b1; sram_we[0] <= 1'b1; sram_addr[0] <= 32'h0000_2000;
-      sram_wdata[0] <= 32'hBAD5_0000;
+      t_en[0] <= 1'b1; t_we[0] <= 1'b1; t_addr[0] <= 32'h0000_2000;
+      t_wdata[0] <= 32'hBAD5_0000;
       @(negedge port_clk);
-      sram_en[0] <= 1'b0;
+      t_en[0] <= 1'b0;
       drain();
 
       // partial W1C: bits 0+1 set; clearing only bit0 must leave bit1
@@ -1039,10 +2739,10 @@ module tb_hades_top;
       // scheduled zeros (timeout 768 < L=2 release at 1200 -> no sentinel)
       sram_write(0, 32'h0007_7777, 32'h1234_5678);
       @(negedge port_clk);
-      sram_en[0] <= 1'b1; sram_we[0] <= 1'b0; sram_addr[0] <= 32'h0007_7777;
+      t_en[0] <= 1'b1; t_we[0] <= 1'b0; t_addr[0] <= 32'h0007_7777;
       hades_read_expect0(0, pcycle + 1 + cur_lat);
       @(negedge port_clk);
-      sram_en[0] <= 1'b0;
+      t_en[0] <= 1'b0;
       drain();
       axil_rd(CSR_ERR_STATUS, rd);
       hades_check_eq("T8: bit1 timeout set", (rd >> 1) & 32'h1, 32'h1);
@@ -1096,11 +2796,11 @@ module tb_hades_top;
       csr_enable(1, 64'h1, 1);
       for (int k = 0; k < 12; k++) begin
         @(negedge port_clk);
-        sram_en[0] <= 1'b1; sram_we[0] <= 1'b0; sram_addr[0] <= 32'h800 + 32'(k);
+        t_en[0] <= 1'b1; t_we[0] <= 1'b0; t_addr[0] <= 32'h800 + 32'(k);
         hades_read_expect_late(0, pcycle + 1 + cur_lat);  // data don't-care
       end
       @(negedge port_clk);
-      sram_en[0] <= 1'b0;
+      t_en[0] <= 1'b0;
       drain();
       axil_rd(CSR_ERR_STATUS, rd);
       hades_check_eq("OVF: bit2 dropped-request set", (rd >> 2) & 32'h1, 32'h1);
@@ -1199,16 +2899,16 @@ module tb_hades_top;
           d = rs[p];
           rs[p] ^= rs[p] << 13; rs[p] ^= rs[p] >> 17; rs[p] ^= rs[p] << 5;
           w = rs[p] & 32'h1;
-          sram_en[p]    <= 1'b1;
-          sram_we[p]    <= 1'(w[0]);
-          sram_addr[p]  <= a;
-          sram_wdata[p] <= d;
+          t_en[p]    <= 1'b1;
+          t_we[p]    <= 1'(w[0]);
+          t_addr[p]  <= a;
+          t_wdata[p] <= d;
           if (w[0]) hades_mem_write(p, a, d);
           else      hades_read_expect(p, pcycle + 1 + cur_lat, a);
         end
       end
       @(negedge port_clk);
-      for (int p = 0; p < n_ports; p++) sram_en[p] <= 1'b0;
+      for (int p = 0; p < n_ports; p++) t_en[p] <= 1'b0;
     end
   endtask
 
@@ -1257,19 +2957,19 @@ module tb_hades_top;
         for (int p = 0; p < N_MAX; p++) begin
           a = 32'h0001_0000 + 32'(k);
           d = 32'h5A00_0000 ^ (32'(p) << 16) ^ 32'(k);
-          sram_en[p] <= 1'b1; sram_we[p] <= 1'b1;
-          sram_addr[p] <= a; sram_wdata[p] <= d;
+          t_en[p] <= 1'b1; t_we[p] <= 1'b1;
+          t_addr[p] <= a; t_wdata[p] <= d;
           hades_mem_write(p, a, d);
         end
         @(negedge port_clk);
         for (int p = 0; p < N_MAX; p++) begin
           a = 32'h0001_0000 + 32'(k);
-          sram_en[p] <= 1'b1; sram_we[p] <= 1'b0; sram_addr[p] <= a;
+          t_en[p] <= 1'b1; t_we[p] <= 1'b0; t_addr[p] <= a;
           hades_read_expect(p, pcycle + 1 + cur_lat, a);   // RAW: new data
         end
       end
       @(negedge port_clk);
-      for (int p = 0; p < N_MAX; p++) sram_en[p] <= 1'b0;
+      for (int p = 0; p < N_MAX; p++) t_en[p] <= 1'b0;
       drain();
       axil_rd(CSR_ERR_STATUS, rd);
       hades_check_eq("T5: ERR_STATUS clean", rd & 32'h3F, 0);
@@ -1499,9 +3199,9 @@ module tb_hades_top;
 
       // data-fault injection on port 0: corrupt the shaper's rdata for a few
       // periods -> the per-cycle checker must count mismatches
-      force dut.g_ports[0].u_port.u_shaper.rdata = 32'hDEAD_BEEF;
+      force dut.g_port0.u_port.u_shaper.rdata = 32'hDEAD_BEEF;
       repeat (8) @(posedge port_clk);
-      release dut.g_ports[0].u_port.u_shaper.rdata;
+      release dut.g_port0.u_port.u_shaper.rdata;
       repeat (20) @(posedge port_clk);   // let the toggles cross + count
       axil_wr(CSR_PORT_SEL, 32'd0);
       axil_rd(CSR_PORT_STAT_ERR, err_cnt);
@@ -1509,9 +3209,9 @@ module tb_hades_top;
                         err_cnt, 32'd1, 32'h7FFF_FFFF);
 
       // phase-fault injection on port 0: swallow rvalid for a few periods
-      force dut.g_ports[0].u_port.u_shaper.rvalid = 1'b0;
+      force dut.g_port0.u_port.u_shaper.rvalid = 1'b0;
       repeat (4) @(posedge port_clk);
-      release dut.g_ports[0].u_port.u_shaper.rvalid;
+      release dut.g_port0.u_port.u_shaper.rvalid;
       repeat (20) @(posedge port_clk);
       axil_rd(CSR_PORT_STAT_ERR, rd);
       hades_check_range("SELFTEST: PORT_STAT_ERR[0] after phase fault",
@@ -1625,9 +3325,9 @@ module tb_hades_top;
       // a request on a now-disabled port must be ignored (the monitor
       // flags any unexpected rvalid)
       @(negedge port_clk);
-      sram_en[5] <= 1'b1; sram_we[5] <= 1'b0; sram_addr[5] <= 32'h100;
+      t_en[5] <= 1'b1; t_we[5] <= 1'b0; t_addr[5] <= 32'h100;
       @(negedge port_clk);
-      sram_en[5] <= 1'b0;
+      t_en[5] <= 1'b0;
       repeat (4) @(negedge port_clk);
       axil_rd(CSR_ERR_STATUS, rd);
       hades_check_eq("T12: clean after reload", rd & 32'h3F, 0);
@@ -1702,21 +3402,21 @@ module tb_hades_top;
       for (int p = 0; p < N_MAX; p++) begin
         a = 32'h0000_5000 + 32'(p);
         d = 32'hD00D_0000 + 32'(p);
-        sram_en[p] <= 1'b1; sram_we[p] <= 1'b1;
-        sram_addr[p] <= a; sram_wdata[p] <= d;
+        t_en[p] <= 1'b1; t_we[p] <= 1'b1;
+        t_addr[p] <= a; t_wdata[p] <= d;
         hades_mem_write(p, a, d);
       end
       // round 1: reads; engines busy when the reset lands right after
       @(negedge port_clk);
       for (int p = 0; p < N_MAX; p++) begin
         a = 32'h0000_5040 + 32'(p);
-        sram_en[p] <= 1'b1; sram_we[p] <= 1'b0; sram_addr[p] <= a;
+        t_en[p] <= 1'b1; t_we[p] <= 1'b0; t_addr[p] <= a;
         hades_read_expect(p, pcycle + 1 + cur_lat, a);
       end
       // suppress checks across the wiped in-flight traffic, reset NOW
       // (engines are mid-flight), drop orphaned expectations, resume
       hades_suspend_checks(1);
-      for (int p = 0; p < N_MAX; p++) sram_en[p] <= 1'b0;
+      for (int p = 0; p < N_MAX; p++) t_en[p] <= 1'b0;
       do_reset();
       hades_phase_init();
       hades_suspend_checks(0);
@@ -1797,9 +3497,9 @@ module tb_hades_top;
       // errors on any unexpected rvalid automatically)
       for (int k = 0; k < 3; k++) begin
         @(negedge port_clk);
-        sram_en[0] <= 1'b1; sram_we[0] <= 1'b0; sram_addr[0] <= 32'h40;
+        t_en[0] <= 1'b1; t_we[0] <= 1'b0; t_addr[0] <= 32'h40;
         @(negedge port_clk);
-        sram_en[0] <= 1'b0;
+        t_en[0] <= 1'b0;
       end
       repeat (4) @(negedge port_clk);
       port_clk_set_khz(500);
@@ -1862,17 +3562,17 @@ module tb_hades_top;
 
       // X on emulated-port inputs while en=0: ignored by design.
       // (whole-vector force: xsim forbids part-selects of variables in force)
-      force sram_addr  = 'x;
-      force sram_wdata = 'x;
+      force t_addr  = 'x;
+      force t_wdata = 'x;
       repeat (3) @(posedge port_clk);
-      release sram_addr;
-      release sram_wdata;
+      release t_addr;
+      release t_wdata;
 
       // X on the internal quasi-static slot data while idle: the shaper must
       // never sample it (no release pending)
-      force dut.g_ports[0].u_port.slot_data_u = 'x;
+      force dut.g_port0.u_port.slot_data_u = 'x;
       repeat (3) @(posedge port_clk);
-      release dut.g_ports[0].u_port.slot_data_u;
+      release dut.g_port0.u_port.slot_data_u;
 
       // X on the idle AXI R channel (rvalid=0): rdata/rresp may be garbage
       // in a real MIG when no read is in flight; must not reach the slots
@@ -1973,6 +3673,95 @@ module tb_hades_top;
   endtask
 
   // ------------------------------------------------------------------
+  // Width-matrix tests (v1.1.0): per-port widths 1..512 + byte enables.
+  // ------------------------------------------------------------------
+  // per-port W-word address ceiling: 16 MiB default window / stride
+  function automatic int aw_max(input int p);
+    return ((PORT_MB_DEFAULT * 1024 * 1024 / 4) >> wshift_f(w_of(p))) - 1;
+  endfunction
+
+  // byte-enable mask of the actually-used byte lanes of port p
+  function automatic bit [63:0] be_mask(input int p);
+    int nb;
+    nb = (w_of(p) + 7) / 8;
+    return (nb >= 64) ? {64{1'b1}} : ((64'(1) << nb) - 1);
+  endfunction
+
+  // full-width replicated pattern, tagged by port+addr
+  function automatic bit [511:0] wpat(input int port, input int addr);
+    logic [31:0] x;
+    x = 32'hA500_0000 ^ 32'(port * 32'h101) ^ 32'(addr);
+    return {16{x}};
+  endfunction
+
+  // W1: width smoke on every active port — seed + readback, exact-L checking
+  task automatic test_w1();
+    begin
+      hades_log($sformatf("--- W1: per-port width smoke, N=%0d ---", N));
+      calib_done = 1'b1;
+      csr_enable(2, (64'(1) << N) - 1);
+      for (int p = 0; p < N; p++) begin
+        for (int a = 0; a < 4; a++)
+          sram_write(p, (a * 64'h111) & 64'(aw_max(p)), wpat(p, (a * 64'h111) & 64'(aw_max(p))));
+      end
+      drain();
+      for (int p = 0; p < N; p++) begin
+        for (int a = 0; a < 4; a++)
+          sram_read(p, (a * 64'h111) & 64'(aw_max(p)));
+      end
+      drain();
+    end
+  endtask
+
+  // W2: exact-latency bursts at L=2 and L=1 across all active ports
+  task automatic test_w2();
+    begin
+      hades_log("--- W2: latency exactness under the width config ---");
+      calib_done = 1'b1;
+      for (int lat = 2; lat >= 1; lat--) begin
+        csr_enable(lat, (64'(1) << N) - 1);
+        for (int p = 0; p < N; p++) sram_write_burst(p, 16, 0, wpat(p, 0));
+        drain();
+        for (int p = 0; p < N; p++) sram_read_burst(p, 16, 0);
+        drain();
+      end
+    end
+  endtask
+
+  // WBE: byte-enable partial writes — merge, all-off no-op, full overwrite
+  task automatic test_wbe();
+    int done_any;
+    begin
+      hades_log("--- WBE: byte-enable partial writes ---");
+      calib_done = 1'b1;
+      csr_enable(2, (64'(1) << N) - 1);
+      done_any = 0;
+      for (int p = 0; p < N; p++) begin
+        if (be_of(p)) begin
+          done_any++;
+          sram_write(p, 0, wpat(p, 0));                          // seed
+          drain();
+          sram_write_be(p, 0, {16{32'h5A5A_5A01}},               // even bytes only
+                        64'h5555_5555_5555_5555 & be_mask(p));
+          drain();
+          sram_read(p, 0);                                       // merged value
+          drain();
+          sram_write_be(p, 0, {16{32'hDEAD_BEEF}}, '0);          // no-op
+          drain();
+          sram_read(p, 0);                                       // still merged
+          drain();
+          sram_write_be(p, 0, wpat(p, 7), be_mask(p));           // full overwrite
+          drain();
+          sram_read(p, 0);
+          drain();
+        end
+      end
+      if (done_any == 0)
+        hades_log("WBE: no BE-enabled ports in this configuration — skipped");
+    end
+  endtask
+
+  // ------------------------------------------------------------------
   // Main
   // ------------------------------------------------------------------
   initial begin : p_main
@@ -1984,6 +3773,7 @@ module tb_hades_top;
     // are fixed in both simulators, so regressions are reproducible.
 
     hades_init();
+    for (int p = 0; p < N_MAX; p++) hades_set_port_width(p, w_of(p));
     do_reset();
 
     if (test == "all" || test == "all_csr" || test == "all_static") begin
@@ -2028,6 +3818,15 @@ module tb_hades_top;
     else if (test == "t3") begin calib_done = 1'b1; test_t3();      end
     else if (test == "t4") begin calib_done = 1'b1; test_t4();      end
     else if (test == "t5") begin calib_done = 1'b1; test_t5();      end
+    else if (test == "w1") begin calib_done = 1'b1; test_w1();      end
+    else if (test == "w2") begin calib_done = 1'b1; test_w2();      end
+    else if (test == "wbe") begin calib_done = 1'b1; test_wbe();    end
+    else if (test == "wall") begin
+      calib_done = 1'b1;
+      test_w1(); hades_phase_init();
+      test_w2(); hades_phase_init();
+      test_wbe();
+    end
     else if (test == "t7") begin calib_done = 1'b1; test_t7();      end
     else if (test == "t8") begin calib_done = 1'b1; test_t8();      end
     else if (test == "t9") begin calib_done = 1'b1; test_t9();      end

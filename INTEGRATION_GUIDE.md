@@ -1,153 +1,195 @@
 # HADES-SRAM Integration Guide
 
-HADES-SRAM is the SRAM-emulation sub-project of **HADES** (Hybrid Accelerated and Distributed Emulation System): an FPGA IP core that emulates many independent, deterministic-latency SRAM ports on a **single AMD/Xilinx MIG DDR4 channel**.
+HADES-SRAM is part of **HADES (Hybrid Accelerated and Distributed Emulation System)**. The core presents independent synchronous-SRAM interfaces in the `port_clk` domain and shares one AMD/Xilinx MIG DDR4 channel through an AXI4 backend.
 
-## 1. Overview
+## 1. Core capabilities
 
-The core presents up to **64 independent SRAM ports** (`N_MAX = 64`; the architecture scales to 128) toward the user logic, each a simple synchronous SRAM-style interface in the `port_clk` domain, and funnels all of them through one DDR4 channel via a per-ID AXI4 backend engine.
+- 1–64 separated ports (`N_MAX=64`), default `N=1`.
+- Per-port widths `W0`–`W63`, any integer 1–512 bits; non-powers of two are supported.
+- Per-port byte-enable switches `BE0_EN`–`BE63_EN`.
+- Exact read latency `L ∈ {1,2}` `port_clk` cycles and posted writes. Requests can be accepted on consecutive `port_clk` edges.
+- Shared `port_clk` at 100–500 KHz and `ui_clk` at 300 MHz.
+- `IS_SYNC=1` for phase-related clocks or `IS_SYNC=0` for independent clocks.
+- AXI4-Lite CSR (`CSR_EN=1`) or static parameter configuration (`CSR_EN=0`).
+- Optional per-port self-test and low-priority backdoor access.
 
-Key properties:
+Physical port count, widths, byte-enable switches, address width, and clock mode are **elaboration-time settings**. CSR cannot create physical ports, change their widths, or enable byte enables at runtime. Runtime port masks, latency, address windows, and refresh settings do not change the physical interface.
 
-- **Deterministic read latency**: exactly **L ∈ {1, 2} `port_clk` cycles** — cycle-exact, not statistical. Refresh and ZQ calibration maintenance is scheduled inside the same bound.
-- **Full pipelining**: initiation interval 1 — a port accepts a new request on every `port_clk` edge, reads included.
-- **Posted writes**: a write is complete from the port's perspective at the accepting edge.
-- **Port clock**: 100–500 KHz; backend `ui_clk` 300 MHz (MIG user clock).
-- **Per-port window**: `DW = 32`-bit data, `AW = 22`-bit word address (16 MiB per port), each port mapped to a configurable base/size window in the DDR4 address space.
-- **Clock modes**: `SYNC` (port_clk derived from ui_clk, same source) or `ASYNC` (independent port_clk source, whitelist CDC).
-- **Configuration**: AXI4-Lite CSR variant (`CSR_EN = 1`) or a static parameter-only variant (`CSR_EN = 0`, no bus, no boot sequence).
-- **Self-checking**: optional per-port PRBS selftest engines (`SELFTEST_EN`) with per-port error CSRs.
-- **Backdoor** channel for content load/readout (CSR-driven or pin-level).
+## 2. Build and use the Vivado IP
 
-## 2. Deliverables
+Generate and verify the catalog package:
 
-| Path | Content |
-|---|---|
-| `rtl/` | Synthesizable SystemVerilog-2012 (`hades_sram_top` + submodules) |
-| `constraints/` | `hades_sram_clocks_{sync,async}.xdc` — per-clock-mode timing constraints shipped with the IP |
-| `csr/csr_regmap.md` | Full CSR register map (CSR_EN=1) and static-variant parameter list |
-| `ip/` | `package_ip.tcl` — Vivado IP packager flow (catalog-ready `hades_sram_1.0`); `open_ip_gui.tcl` — open the IP configurator in the Vivado GUI (empty scratch project) |
-| `fpga/vcu1525/` | VCU1525 reference build (bitstream flow + host scripts) |
-| `sim/` | SystemVerilog + DPI-C testbench (VCS and Vivado xsim) |
+```sh
+vivado -mode batch -source ip/package_ip.tcl
+```
 
-## 3. Parameters and configuration
+This creates `ip/hades_sram_1.0/` as a generated Vivado work product. The core VLNV is `rismd.cn:hades:hades_sram:1.1`; the directory name is not the core version. Maintained sources remain in `rtl/`, `constraints/`, `csr/`, and `ip/xgui/`.
 
-### 3.1 Generics (hades_sram_top)
+Register that directory in a Vivado project:
 
-| Parameter | Default | Meaning |
+```tcl
+set_property ip_repo_paths [list /path/to/HADES-SRAM/ip/hades_sram_1.0] [current_project]
+update_ip_catalog
+create_ip -name hades_sram -vendor rismd.cn -library hades -version 1.1 \
+  -module_name hades_sram_0
+```
+
+To open an empty scratch project and the configurator:
+
+```sh
+vivado -source ip/open_ip_gui.tcl
+```
+
+The GUI has General, SRAM Ports, Maintenance, and Static Addressing pages. Ports are grouped in pages of eight, with expandable per-port groups, width fields, and byte-enable checkboxes. Each `sram<i>` block-diagram interface is an expandable tag containing its request, response, address, data, and byte-enable signals.
+
+The GUI helper creates the IP instance before opening the customization dialog after GUI initialization. Do not invoke `start_ip_gui` during Vivado startup and then immediately exit the session; allow the deferred dialog to open.
+
+## 3. SRAM interfaces
+
+Every port `i` has these separate signals in the `port_clk` domain:
+
+| Signal | Direction | Meaning |
 |---|---|---|
-| `N` | 64 | Active ports (≤ `N_MAX`) |
-| `DW` / `AW` | 32 / 22 | Port data width / word-address width |
-| `IS_SYNC` | 1 | Clock mode: 1 = SYNC, 0 = ASYNC |
-| `CSR_EN` | 1 | 1 = AXI4-Lite CSR; 0 = static parameters |
-| `SELFTEST_EN` | 0 | Per-port PRBS self-check engines |
-| `SELFTEST_BLK` | 256 | Selftest words per pass |
-| `TARGET_PERIOD_CYCLES` | 600 | Port period in `ui_clk` cycles (600 = 500 KHz @ 300 MHz) |
-| `P_L` | 2 | Read latency L (static variant) |
-| `P_PORT_EN` | all ones | Per-port enable mask |
-| `P_MIN_PERIOD` | 600 | Over-frequency interlock threshold (ui_clk cycles) |
-| `P_REFRESH_DIV` | 2100 | Refresh gearing (ui_clk cycles per refresh-window tick) |
-| `P_ZQ_DIV` | 32000 | ZQCS gearing |
-| `P_PORT_BASE` / `P_PORT_SIZE` | flat vectors | Per-port window base (AXI beats) and size (static variant) |
+| `sram<i>_en` | Input | Accept a request when high and the port is enabled |
+| `sram<i>_we` | Input | 1 = posted write, 0 = read |
+| `sram<i>_addr[AW-1:0]` | Input | Word address in units of `W<i>` bits |
+| `sram<i>_wdata[W<i>-1:0]` | Input | Write data |
+| `sram<i>_be[63:0]` | Input | Optional byte mask; only the low `ceil(W<i>/8)` bits are used |
+| `sram<i>_rdata[W<i>-1:0]` | Output | Read data |
+| `sram<i>_rvalid` | Output | Read response valid exactly `L` `port_clk` edges after acceptance |
 
-### 3.2 Slot budget (elaboration-time guard)
+When `BE<i>_EN=0`, the `be` input is ignored and writes affect the complete port word. When it is 1, only enabled bytes are written. Unused high `be` bits have no effect. Width and byte-enable settings do not alter the latency contract.
 
-Every enabled port must own enough TDMA slots in the target port period to cover its worst-case demand, and the maintenance (refresh/ZQCS) window must fit as well. `hades_sram_top` evaluates this statically (`budget_ok`): an over-subscribed parameter set **fails elaboration**, so an illegal configuration can never reach hardware. The same bound backs the latency contract: a legal configuration never misses L.
+## 4. Address and lane model
 
-### 3.3 CSR variant vs static variant
-
-- **`CSR_EN = 1`** (default): AXI4-Lite slave exposes all configuration (latency, port enables, per-port base/size, refresh/ZQ gearing, min-period interlock) plus status, error, and statistics registers and the backdoor channel. See `csr/csr_regmap.md`.
-- **`CSR_EN = 0`**: no bus at all. All configuration comes from the `P_*` parameters (including the flat per-port `P_PORT_BASE`/`P_PORT_SIZE` vectors) and is folded into the same internal configuration structure — the core is ready out of reset with no programming sequence. Observability is via pins: `stat_calib_done`, `stat_ready`, `stat_refresh_active`, `stat_zq_active`, `stat_err[7:0]`. Content load/readout uses the pin-level backdoor (`bkp_*`).
-
-## 4. Architecture
-
-### 4.1 Clock domains
-
-- `ui_clk` (300 MHz): backend, arbiter, refresh scheduler, CSR, backend AXI to the MIG.
-- `port_clk` (100–500 KHz): the N emulated SRAM ports. All N ports share one `port_clk`.
-- `SYNC`: port_clk is a divided ui_clk (same source; the divider reloads only at a counter wrap, so every port period has an exact integer length).
-- `ASYNC`: port_clk comes from an independent source; the domains cross only through the CDC whitelist (§5).
-
-### 4.2 Per-port datapath
-
-Each port has: request capture (enable/we/addr/wdata on the port edge), a response path with a timing shaper that releases read data at exactly L cycles, and CDC built from Gray-pointer async FIFOs plus quasi-static hold slots. A port accepts one operation per `port_clk` cycle (read or write) with responses in flight — back-to-back at full rate is the design point.
-
-### 4.3 TDMA arbiter and maintenance
-
-A static TDMA table grants each enabled port its backend slots; per-port eligibility latches feed the table. The refresh/ZQCS scheduler issues DDR4 maintenance through the MIG user-refresh/ZQCS interface, window-geared by `CFG_REFRESH_DIV`/`CFG_ZQ_DIV`, idle-gated and debt-bounded so that maintenance can never push a response past the latency bound. The latency contract holds at every port_clk edge, at both gears and across stop/start.
-
-### 4.4 Backend AXI4 engine and error model
-
-The backend runs multiple outstanding AXI4 transactions (per-ID channels) to the MIG with sub-word lane handling for 32-bit accesses on the 512-bit bus. Error model:
-
-- Illegal/unmapped access → SLVERR-style error record (port error CSR + sticky global status).
-- Backend response timeout (768 `ui_clk` cycles) → the read completes with synthetic zeros and sets `ERR_STATUS.bit1`. This is a liveness backstop with ~5× margin over the worst legal latency — treat bit1 as a fatal alarm: a backend late-but-alive past the timeout is outside the legal model.
-
-### 4.5 Backdoor
-
-A lowest-priority requester for bulk content load/readout that shares the backend without disturbing the latency contract (CSR-driven in the CSR variant, pin-level `bkp_*` in the static variant).
-
-### 4.6 Selftest
-
-`SELFTEST_EN` adds a per-port PRBS generator/checker. A run: clear error state, enable selftest, let engines run, stop, drain (≥16 port periods), read per-port error CSRs and the sticky global status. On-board acceptance traffic uses these engines (the control plane is narrow by design).
-
-## 5. Clocks, resets, CDC
-
-- Resets: synchronous assertion, synchronous deassertion in each domain (`ui_rst_n`, `port_rst_n`); hold both in reset until `calib_done` from the MIG is stable.
-- Constraints: use `constraints/hades_sram_clocks_sync.xdc` for SYNC builds, `constraints/hades_sram_clocks_async.xdc` for ASYNC builds (the packager auto-loads per clock mode).
-- ASYNC crossings use only the whitelist cells in `rtl/hades_sram_cdc.sv` (`hades_sram_sync2`, `hades_sram_qs_bus`, `hades_sram_rst_sync`) — no bare cross-domain wires. The quasi-static buses and async-FIFO arrays are deliberate structures (config written only while quiesced; hold slots stable hold→release; wire delay bounded by max-delay constraints), so a raw `report_cdc` will flag them; reviewed, justified dispositions ship as `fpga/vcu1525/cdc_waivers.tcl` in the reference build. Reuse or review-equivalent them in your own flow.
-
-## 6. Register interface and host protocol
-
-CSR base in the reference build: `0x0000_0000`. Groups: control/status (`CTRL`, `STATUS`), configuration (`CFG_*`, `PORT_EN_*`, per-port window via `PORT_SEL` + `PORT_BASE`/`PORT_SIZE`), measurement (`MEAS_PERIOD`), error/status (`ERR_STATUS`, `PORT_STAT_ERR`, `ERR_ADDR`), statistics (`STAT_*`), identity (`ID`, `PARAMS`). Full map: `csr/csr_regmap.md`.
-
-Host protocol essentials:
-
-1. Program configuration, then set `CTRL.ENABLE`; poll `STATUS` until `CALIB|READY`.
-2. Selftest: clear error state (any write to `PORT_STAT_ERR` per port; write mask to `ERR_STATUS`), set `CTRL.SELFTEST`, wait, clear `SELFTEST`, drain ≥ 16 port periods, then read error registers.
-3. **Quiesce before disable or reconfiguration**: clear `SELFTEST`, wait ≥ 16 port periods, then issue `SOFT_RESET`. Dropping ENABLE with accepted-but-ungranted requests in flight trips the bit5 sentinel — the same rule as for pin traffic.
-4. Error registers are W1C (write-to-clear) and sticky by design.
-
-## 7. MIG integration checklist
-
-- DDR4-2400 (833 ps), RDIMM with ECC (MTA18ASF2G72PZ-2G3 class), 72-bit.
-- User interface: AXI4, 512-bit data, ui_clk 300 MHz (4:1).
-- **Enable "User Refresh and ZQCS Input"** (`CONFIG.C0.DDR4_UserRefresh_ZQCS = true`) — the core drives `app_ref_req`/`app_zq_req` and expects the acks.
-- `sys_rst` is **active-high** on the MIG; check your board reset polarity (a board `resetn` idles high and would hold the MIG in reset if wired directly).
-- `calib_done` (MIG `init_calib_complete`) must be wired in; `STATUS.READY` asserts only after calibration with legal configuration.
-
-## 8. VCU1525 reference build
-
-`fpga/vcu1525/build.tcl` builds a complete board image around the core:
+The AXI backend transfers one 64-byte beat per port operation. Each width maps to a power-of-two number of consecutive 32-bit lanes:
 
 ```
+LC = 2^ceil(log2(ceil(W/32)))
+s  = log2(LC)
+```
+
+`LC` is 1, 2, 4, 8, or 16. A group never straddles a beat; non-power-of-two widths leave tail lanes unused. Data is LSB-justified in its lane group.
+
+For a port word address `addr`:
+
+```
+beat       = PORT_BASE + floor(addr / (16 / LC))
+lane_group = (addr mod (16 / LC)) * LC
+```
+
+`PORT_BASE` and `P_PORT_BASE` are in 64-byte-beat units. `PORT_SIZE` and `P_PORT_SIZE` are **32-bit lane-word counts**, not `W`-bit port-word counts. Legal frontend addresses satisfy:
+
+```
+0 <= addr < floor(PORT_SIZE / LC)
+```
+
+Read `PORT_WIDTH` at CSR offset `0x3C` to obtain the selected port's width and calculate `LC`.
+
+Defaults per port:
+
+- Base: `i * 2^18` beats, giving 16 MiB of address spacing.
+- Size: `2^22` 32-bit lane words.
+- At `W=32`, `LC=1`, this is `2^22` port words = 16 MiB.
+- At `W=64`, `LC=2`, this is `2^21` port words = 16 MiB.
+- At `W=40`, `LC=2`, this is `2^21` port words = 10 MiB because each 64-bit group has only 40 useful bits.
+
+Widths do not automatically resize the address map. Adjust bases and sizes when changing the desired capacity or avoiding overlap. The backend applies the used-byte mask and optional byte enables without writing unused tail bytes.
+
+## 5. Clocks, resets, and CDC
+
+- `ui_clk` is 300 MHz for backend logic, CSR, and the MIG user interface.
+- All emulated ports share one `port_clk`, 100–500 KHz.
+- `ui_rst_n` and `port_rst_n` are active-low synchronous resets. Hold the datapath in reset until MIG calibration is stable.
+
+### SYNC (`IS_SYNC=1`)
+
+Use clocks from one source with a fixed, statically declared phase relationship. Do not use spread-spectrum or runtime-drifting sources. Define the generated clocks and let normal timing analysis cover the domain crossings. Violating the same-source assumption is an integration error.
+
+### ASYNC (`IS_SYNC=0`)
+
+Use independent clocks. CDC is contained in `rtl/hades_sram_cdc.sv`: two-flop synchronizers, quasi-static bus holds, reset synchronizers, and Gray-pointer asynchronous FIFOs. Do not add bare cross-domain buses or combinational crossings.
+
+The generated IP loads `hades_sram_clocks_sync.xdc` automatically. For an ASYNC build, remove that SYNC constraint and use `doc/hades_sram_clocks_async.xdc` instead; ASYNC constraints are not selected automatically by the packager. Review `report_cdc`. The VCU1525 flow supplies reviewed dispositions in `fpga/vcu1525/cdc_waivers.tcl` and requires zero unwaived Critical/Warning findings; equivalent review is required in another integration.
+
+## 6. Configuration
+
+### CSR (`CSR_EN=1`)
+
+The AXI4-Lite CSR is in the `ui_clk` domain. The VCU1525 reference build maps it at `0x0000_0000`; board-control registers are at `0x0001_0000`.
+
+Recommended sequence:
+
+1. Wait for `STATUS.CALIB_DONE` and check `MEAS_PERIOD` against the intended gear. At 300 MHz, expect 600 cycles for 500 KHz and 3000 for 100 KHz.
+2. Set `CFG_PORTS` no greater than elaborated `N` and set `PORT_EN_LO/HI` for the desired runtime subset. These controls cannot expose additional physical ports.
+3. For each active port, select it with `PORT_SEL`, then configure `PORT_BASE`, `PORT_BASE_HI`, and `PORT_SIZE`. Read `PORT_WIDTH` when lane calculations are needed.
+4. Set `CFG_LATENCY`, `CFG_MIN_PERIOD`, `CFG_REFRESH_DIV`, and `CFG_ZQ_DIV`.
+5. Set `CTRL.ENABLE` and poll `STATUS.READY`.
+6. Before disabling or reconfiguring, stop traffic and allow at least 16 `port_clk` periods to drain, then issue `SOFT_RESET`.
+
+`CFG_LATENCY` takes effect on the next ENABLE 0-to-1 transition. `PORT_WIDTH` and byte-enable settings are compile-time values, not runtime CSR settings. See `csr/csr_regmap.md` for every register.
+
+### Static (`CSR_EN=0`)
+
+No CSR bus or boot sequence is needed. The core uses parameters directly and auto-enables after calibration with a healthy clock:
+
+- `P_L`, `P_PORT_EN`, `P_MIN_PERIOD`, `P_REFRESH_DIV`, and `P_ZQ_DIV`.
+- Flat `P_PORT_BASE` and `P_PORT_SIZE` vectors, sliced independently per port.
+- `N`, `AW`, `IS_SYNC`, `SELFTEST_EN`, `SELFTEST_BLK`, `TARGET_PERIOD_CYCLES`, `W0`–`W63`, and `BE0_EN`–`BE63_EN`.
+
+Status is available on `stat_calib_done`, `stat_ready`, `stat_refresh_active`, `stat_zq_active`, and `stat_err[7:0]`. Content access uses the pin-level `bkp_*` channel. Static self-test engines run automatically when enabled, but their per-port counters have no CSR readout.
+
+## 7. Backdoor access
+
+The backdoor initializes or reads memory without driving frontend ports. It has the lowest arbitration priority, uses maintenance windows and idle slots, and can run while the core is disabled.
+
+**Backdoor addresses are 32-bit lane offsets**, and data is 32 bits per command. At `W=32`, lane offsets equal frontend word addresses. At other widths, use the lane-group mapping in §4; a backdoor lane offset is not generally a `W`-bit frontend word address. The legality check is `BKP_ADDR < PORT_SIZE` for the selected port.
+
+For CSR operation, write `BKP_PORT`, `BKP_ADDR`, `BKP_ADDR_HI`, and `BKP_WDATA`, trigger `BKP_CMD`, poll `BKP_STATUS.done`, then read `BKP_RDATA`. In the static variant, hold `bkp_port`, `bkp_addr`, `bkp_wdata`, and `bkp_we` stable with `bkp_req` asserted until `bkp_ack`.
+
+A full 64-port, 1 GiB initialization is about 16.8 million backend beats, roughly 56 ms of backend bus time before arbitration overhead. Allow approximately 0.1–0.2 seconds of chip time in an otherwise idle system. JTAG-AXI is a control-plane path: at approximately 10^3–10^4 32-bit words/s, a full 1 GiB host-driven traversal takes hours. Use sparse content checks or the on-chip self-test for full-rate verification instead.
+
+## 8. MIG and VCU1525 checklist
+
+- Use C0, DDR4-2400, 72-bit RDIMM, AXI4 with 512-bit data, and `ui_clk=300 MHz`.
+- Enable **User Refresh and ZQCS Input**. The core drives `app_ref_req` and `app_zq_req` and expects their acknowledgments.
+- ECC is disabled in the reference configuration. The fitted RDIMM/board routing provides no DM/DBI pins, so partial-beat writes incur MIG read-modify-write overhead.
+- MIG `sys_rst` is active-high. The board's `CPU_RESETn` signal is inverted before use. Connect `init_calib_complete` to `calib_done`.
+- The reference part is `xcvu9p-fsgd2104-2L-e`.
+- The MIG C0 controller and PHY are board-fixed in SLR0. Do not add a ranged user pblock that conflicts with the MIG-generated placement constraints. HADES AXI boundaries and backend response channels are registered, keeping SLR crossings FF-to-FF; close timing with `report_timing`.
+- The host control plane is JTAG-AXI, not PCIe/XDMA.
+
+Build the reference image with:
+
+```sh
 vivado -mode batch -source fpga/vcu1525/build.tcl -tclargs SYNC|ASYNC [PCIE|MMCM]
 ```
 
-Products: `fpga/vcu1525/build/<tag>/hades_sram_vcu1525_<tag>.bit` + `.ltx` + `reports/` (timing, utilization, DRC, CDC for ASYNC). Scripted gates: route WNS ≥ 0; ASYNC additionally report_cdc with zero unwaived Critical/Warning findings (waivers per §5).
+The SYNC build divides `ui_clk` to form `port_clk`. The ASYNC/MMCM build uses another MMCM and boots at a conservative gear until the host selects the target gear. Build gates include nonnegative setup/hold WNS, DRC checks, and ASYNC CDC review.
 
-Reference-build specifics:
+Board scripts are in `fpga/vcu1525/host/`; arguments are documented in each file header. They cover initialization, latency, sustained load, refresh, frequency gears, configuration, endurance, and clock stop/start. For ASYNC/MMCM tests, set `HADES_SRC_UI_RATIO=3` because the frequency monitor counts `ui_clk` cycles while the divider counts the 100 MHz MMCM source cycles. Associate the matching `.ltx` probes file through `HADES_LTX` when using ILA.
 
-- **Part**: xcvu9p-**fsgd2104-2L-e** (low-voltage grade, board-file authoritative).
-- **Control path: JTAG-AXI only** (no PCIe/XDMA). CSRs sit at JTAG-AXI `0x0000_0000`, board control at `0x0001_0000`; bandwidth acceptance runs on the on-chip selftest engines.
-- **Port clock**: SYNC = ui_clk/600 fabric divider; ASYNC = second MMCM on another onboard oscillator input (same crystal family — the PCIe-slot-refclk variant is prepared in RTL/XDC but pin-unverified). ASYNC boots at a safe ~167 KHz gear until the host programs the divider.
-- **Write-supply note (this platform)**: the fitted RDIMM is x4-class and the board routes no DM/DBI pins, so every 32-bit write is a MIG-internal read-modify-write. Measured full-load capacity supports **56 ports at full rate**; reads alone are clean at 64. Plan port count accordingly on this board.
-- **Host scripts** (`fpga/vcu1525/host/`, run with `vivado -mode batch -source host/<script>.tcl -tclargs ...`; args in each header): `program` (bitstream), `smoke`, `a2_init` (power-up init), `a4_latency` (latency accuracy), `a5_soak` / `a9_soak` (sustained-load and endurance), `a6_refresh` (refresh rate), `a7_dualfreq` (dual gears), `a8_config` (config loop + over-frequency interlock), `a10_clock` (clock stop/start + gear sweep). Conventions: 6 MHz TCK; `HADES_LTX` points at the probes file; `HADES_SRC_UI_RATIO=3` when testing an ASYNC/MMCM image (the frequency monitor counts ui_clk cycles, the divider counts source cycles).
+For sustained or long on-board tests, enable the built-in checkers and require all selected `PORT_STAT_ERR` counters and `ERR_STATUS` to remain zero. `a5_soak`, `a9_soak`, and `a10_clock` provide sustained-load, endurance, and clock stop/start coverage. Use the documented quiesce sequence before stopping or reprogramming.
 
-## 9. Known limitations
+## 9. Slot budget and error handling
 
-- All ports share one `port_clk` (per-port clocks are a future parameterization; the cross-domain structures are already per-port).
-- DDR4 channels C1–C3 unused (multi-channel is the documented expansion path when N exceeds one channel's slot budget).
-- No caching/prefetch/write-combining (aggregate port demand is a small fraction of the DDR4 channel).
-- L is global across ports (per-group extension bits reserved).
-- Backend timeout fault model: see §4.4 — bit1 is a fatal alarm.
-- Static variant: per-port selftest error counters have no readout bus; only the aggregated `stat_err` pins are visible.
-- On the VCU1525 platform, full read+write load is practical up to 56 ports (§8); reads alone are clean at 64.
+Elaboration checks the static bound:
 
-## 10. Design headroom
+```
+MAINT_SLOTS + FIRST_LAT + CDC_OVHD + N_ACTIVE*SLOT_PER_PORT + MARGIN
+  < TARGET_PERIOD_CYCLES
+```
 
-- If a future target needs more timing margin, the architecture admits deeper parameterized pipelining in the backend engines (request prepare/issue stages) and in the arbiter/release paths without touching the port contract. A conservative fallback frequency target (~266 MHz) is documented as an option.
-- Write coalescing at the backend would lift the platform's 64-port full-load ceiling (§8) by removing the read-modify-write penalty on sub-beat writes.
+At 500 KHz (600 cycles), 64 ports fit; 128 do not. At 100 KHz (3000 cycles), 128 fit. The current physical interface supports at most 64 ports. Width does not change this budget because every operation uses one beat.
 
-## 11. Verification
+An illegal address produces an error record instead of an AXI access. A backend read unanswered for 768 `ui_clk` cycles completes with synthetic zeros and sets `ERR_STATUS.bit1`; treat that as a fatal backend alarm. `ERR_STATUS.bit5` reports a missed response window and must remain zero in a legal configuration.
 
-The core ships with a SystemVerilog + DPI-C testbench covering the datapath, determinism, error paths, reset recovery, and CDC, green on both VCS and Vivado xsim with coverage gates (line ≥ 95%, FSM 100%). On VCU1525 hardware, both clock modes passed acceptance: power-up init, latency accuracy with ILA witness, refresh rate, dual frequency gears, configuration loop with over-frequency interlock, clock stop/start and sweep dynamics, and multi-hour full-load endurance with temperature logging.
+## 10. Limitations
+
+- All ports share `port_clk`; read latency is global across ports.
+- Only C0 is used. C1–C3 are expansion options, not current implementations.
+- No caching, prefetching, or write coalescing is implemented.
+- Static self-test counters have no bus readout.
+- Non-32-bit-width ports require care when translating backdoor lane addresses.
+- On the VCU1525 reference platform, full read+write traffic is practical up to 56 ports at the default 32-bit width; read-only traffic reaches 64. Partial-beat write overhead is the limiting factor.
+- `BOARD_DIV_DEFAULT` is not consumed by the board RTL; use the host gear-setting sequence to select the operating frequency.

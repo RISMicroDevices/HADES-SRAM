@@ -55,24 +55,54 @@ DEF_static    := +define+CSR_STATIC
 DEF_ovrd      := +define+CSR_STATIC+PARAM_OVRD
 DEF_st        := +define+SELFTEST
 
+# v1.1.0 width-matrix variants (SYNC + CSR_EN; elaboration-time port params)
+PVAL_VCS_w512 := -pvalue+tb_hades_top.N=16 $(foreach i,$(shell seq 0 63),-pvalue+tb_hades_top.W$i=512)
+PVAL_VCS_w64  := -pvalue+tb_hades_top.N=32 $(foreach i,$(shell seq 0 63),-pvalue+tb_hades_top.W$i=64)
+PVAL_VCS_wmix := -pvalue+tb_hades_top.N=8 \
+  -pvalue+tb_hades_top.W0=512 -pvalue+tb_hades_top.W1=256 \
+  -pvalue+tb_hades_top.W2=128 -pvalue+tb_hades_top.W3=64 \
+  -pvalue+tb_hades_top.W4=40  -pvalue+tb_hades_top.W5=32 \
+  -pvalue+tb_hades_top.W6=8   -pvalue+tb_hades_top.W7=1 \
+  -pvalue+tb_hades_top.BE2_EN=1 -pvalue+tb_hades_top.BE5_EN=1
+# non-power-of-2 widths (user request): sub-lane partials (24/13),
+# non-pow2 lane groups (100->LC8, 300->LC16, 500->LC16), incl. BE on 13
+PVAL_VCS_wnp2 := -pvalue+tb_hades_top.N=8 \
+  -pvalue+tb_hades_top.W0=24  -pvalue+tb_hades_top.W1=48 \
+  -pvalue+tb_hades_top.W2=100 -pvalue+tb_hades_top.W3=300 \
+  -pvalue+tb_hades_top.W4=13  -pvalue+tb_hades_top.W5=200 \
+  -pvalue+tb_hades_top.W6=96  -pvalue+tb_hades_top.W7=160 \
+  -pvalue+tb_hades_top.BE2_EN=1 -pvalue+tb_hades_top.BE4_EN=1
+GENX_w512 := -generic_top "N=16" $(foreach i,$(shell seq 0 63),-generic_top "W$i=512")
+GENX_w64  := -generic_top "N=32" $(foreach i,$(shell seq 0 63),-generic_top "W$i=64")
+GENX_wmix := -generic_top "N=8" \
+  -generic_top "W0=512" -generic_top "W1=256" -generic_top "W2=128" \
+  -generic_top "W3=64"  -generic_top "W4=40"  -generic_top "W5=32" \
+  -generic_top "W6=8"   -generic_top "W7=1" \
+  -generic_top "BE2_EN=1" -generic_top "BE5_EN=1"
+GENX_wnp2 := -generic_top "N=8" \
+  -generic_top "W0=24"  -generic_top "W1=48"  -generic_top "W2=100" \
+  -generic_top "W3=300" -generic_top "W4=13"  -generic_top "W5=200" \
+  -generic_top "W6=96"  -generic_top "W7=160" \
+  -generic_top "BE2_EN=1" -generic_top "BE4_EN=1"
+
 TEST_csr       := all_csr
 TEST_csr_async := all_csr
 TEST_static    := all_static
 TEST_ovrd      := all_static
 TEST_st        := selftest
 
-VCS_VARIANTS := csr csr_async static ovrd st
+VCS_VARIANTS := csr csr_async static ovrd st w512 w64 wmix wnp2
 
 $(BUILD)/vcs_%/simv: $(RTL) $(TB) $(MDL) $(CPP)
 	@mkdir -p $(@D)
-	cd $(@D) && $(VCS) $(VCS_COMMON) $(DEF_$*) $(RTL_ABS) $(TB_ABS) $(MDL_ABS) $(CPP_ABS) \
+	cd $(@D) && $(VCS) $(VCS_COMMON) $(DEF_$*) $(PVAL_VCS_$*) $(RTL_ABS) $(TB_ABS) $(MDL_ABS) $(CPP_ABS) \
 	  -o simv > compile.log 2>&1 \
 	  || { echo "VCS compile FAILED ($@)"; tail -40 compile.log; exit 1; }
 
 test-vcs: $(foreach v,$(VCS_VARIANTS),$(BUILD)/vcs_$(v)/simv)
 	@fail=0; \
 	for v in $(VCS_VARIANTS); do \
-	  case $$v in static|ovrd) t=all_static;; st) t=selftest;; *) t=all_csr;; esac; \
+	  case $$v in static|ovrd) t=all_static;; st) t=selftest;; w512|w64|wmix|wnp2) t=wall;; *) t=all_csr;; esac; \
 	  echo "=== VCS $$v TEST=$$t OPS=$(OPS_vcs) ==="; \
 	  ./$(BUILD)/vcs_$$v/simv +TEST=$$t +OPS=$(OPS_vcs) > $(BUILD)/vcs_$$v/run.log 2>&1; \
 	  grep -E "HADES-TB\] (FAIL|checks)" $(BUILD)/vcs_$$v/run.log | tail -8; \
@@ -138,7 +168,7 @@ $(BUILD)/xsim_%/snap: $(RTL) $(TB) $(MDL) $(CPP)
 	cd $(@D) && g++ -shared -fPIC -static-libstdc++ -static-libgcc \
 	  -I$(VIVADO)/data/xsim/include $(CPP_ABS) -o hadesdpi.so >> compile.log 2>&1
 	cd $(@D) && $(VIVADO_BIN)/xelab --timescale 1ns/1ps -top tb_hades_top -snapshot snap \
-	  -sv_root . -sv_lib hadesdpi >> compile.log 2>&1 \
+	  $(GENX_$*) -sv_root . -sv_lib hadesdpi >> compile.log 2>&1 \
 	  || { echo "xelab FAILED ($@)"; tail -30 compile.log; exit 1; }
 
 XSIM_DEF_csr       :=
@@ -147,12 +177,12 @@ XSIM_DEF_static    := --define CSR_STATIC
 XSIM_DEF_ovrd      := --define CSR_STATIC --define PARAM_OVRD
 XSIM_DEF_st        := --define SELFTEST
 
-XSIM_VARIANTS := csr csr_async static ovrd st
+XSIM_VARIANTS := csr csr_async static ovrd st w512 w64 wmix wnp2
 
 test-xsim: $(foreach v,$(XSIM_VARIANTS),$(BUILD)/xsim_$(v)/snap)
 	@fail=0; \
 	for v in $(XSIM_VARIANTS); do \
-	  case $$v in static|ovrd) t=all_static;; st) t=selftest;; *) t=all_csr;; esac; \
+	  case $$v in static|ovrd) t=all_static;; st) t=selftest;; w512|w64|wmix|wnp2) t=wall;; *) t=all_csr;; esac; \
 	  echo "=== xsim $$v TEST=$$t OPS=$(OPS_xsim) ==="; \
 	  cd $(BUILD)/xsim_$$v && $(VIVADO_BIN)/xsim snap -R -testplusarg TEST=$$t \
 	    -testplusarg OPS=$(OPS_xsim) > run.log 2>&1; cd ../..; \

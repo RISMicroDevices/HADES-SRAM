@@ -1,11 +1,12 @@
 //-----------------------------------------------------------------------------
 // HADES-SRAM — backdoor channel (spec 3.3; ui_clk domain).  Lets the host
-// initialize/verify the emulated SRAM contents without the target ports:
-// a command (port, word address, optional wdata) is translated exactly like
-// a port access (beat = port_base[port] + addr/lanes-per-beat, lane from the
-// low address bits) and handed to hades_sram_mig_if as the lowest-priority
-// requester — it runs in the maintenance window and idle slots only, so
-// in-flight target traffic is never delayed beyond the slot budget (T9).
+// initialize/verify the emulated SRAM contents without the target ports.
+// Commands address 32-bit lanes within the selected port: beat = base +
+// offset/16 and lane = offset%16.  This matches frontend addresses at W=32;
+// other widths require the lane-group mapping in INTEGRATION_GUIDE.md rather
+// than interpreting the offset as a W-bit port-word address.  Requests enter
+// hades_sram_mig_if at the lowest priority, only in maintenance windows and
+// idle slots, so in-flight target traffic is never delayed beyond the budget.
 //
 // A command whose port >= N_MAX or address >= port_size[port] completes
 // immediately with err=1 and no AXI traffic.  done is a 1-cycle strobe;
@@ -29,7 +30,7 @@ module hades_sram_backdoor
   input  wire logic        cmd_rd,      // 1-cycle strobe
   input  wire logic        cmd_wr,      // 1-cycle strobe
   input  wire logic [7:0]  cmd_port,
-  input  wire logic [39:0] cmd_addr,    // DW-word address within the port
+  input  wire logic [39:0] cmd_addr,    // 32-bit lane offset within the port
   input  wire logic [DW-1:0] cmd_wdata,
   output      logic        busy,
   output      logic        done,        // 1-cycle strobe
