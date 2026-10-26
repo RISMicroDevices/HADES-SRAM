@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="800" viewBox="0 0 1400 800" role="img" aria-labelledby="title desc">
+  <title id="title">HADES-SRAM backend beat and lane mapping</title>
+  <desc id="desc">A backend beat has sixteen 32-bit lanes. Each frontend word uses a power-of-two lane group, with unused padding for widths that do not fill the group.</desc>
+  <defs><style>
+    .title{font-family:'DejaVu Sans',sans-serif;font-size:30px;font-weight:700;fill:#15364a}.head{font-family:'DejaVu Sans',sans-serif;font-size:19px;font-weight:700;fill:#15364a}.text{font-family:'DejaVu Sans',sans-serif;font-size:17px;fill:#253c48}.small{font-family:'DejaVu Sans',sans-serif;font-size:15px;fill:#415965}.mono{font-family:'DejaVu Sans Mono',monospace;font-size:16px;fill:#15364a}.lane{fill:#eef4f8;stroke:#7691a2;stroke-width:1.4}.used{fill:#2a8c94;stroke:#17636a;stroke-width:1.4}.pad{fill:#dce2e6;stroke:#9baab4;stroke-width:1.4}.usedtext{font-family:'DejaVu Sans',sans-serif;font-size:16px;font-weight:700;fill:white}.padtext{font-family:'DejaVu Sans',sans-serif;font-size:15px;fill:#415965}.rule{stroke:#ccd8df;stroke-width:1.5}
+  </style></defs>
+  <text x="40" y="48" class="title">One 64-byte backend beat per frontend operation</text>
+  <text x="40" y="88" class="head">16 lanes × 32 bits (4 bytes) = 512 bits</text>
+
+  <g transform="translate(250 110)">
+    <rect x="0" y="0" width="60" height="62" class="lane"/><rect x="60" y="0" width="60" height="62" class="lane"/><rect x="120" y="0" width="60" height="62" class="lane"/><rect x="180" y="0" width="60" height="62" class="lane"/>
+    <rect x="240" y="0" width="60" height="62" class="lane"/><rect x="300" y="0" width="60" height="62" class="lane"/><rect x="360" y="0" width="60" height="62" class="lane"/><rect x="420" y="0" width="60" height="62" class="lane"/>
+    <rect x="480" y="0" width="60" height="62" class="lane"/><rect x="540" y="0" width="60" height="62" class="lane"/><rect x="600" y="0" width="60" height="62" class="lane"/><rect x="660" y="0" width="60" height="62" class="lane"/>
+    <rect x="720" y="0" width="60" height="62" class="lane"/><rect x="780" y="0" width="60" height="62" class="lane"/><rect x="840" y="0" width="60" height="62" class="lane"/><rect x="900" y="0" width="60" height="62" class="lane"/>
+    <text x="30" y="38" text-anchor="middle" class="mono">L0</text><text x="90" y="38" text-anchor="middle" class="mono">L1</text><text x="150" y="38" text-anchor="middle" class="mono">L2</text><text x="210" y="38" text-anchor="middle" class="mono">L3</text>
+    <text x="270" y="38" text-anchor="middle" class="mono">L4</text><text x="330" y="38" text-anchor="middle" class="mono">L5</text><text x="390" y="38" text-anchor="middle" class="mono">L6</text><text x="450" y="38" text-anchor="middle" class="mono">L7</text>
+    <text x="510" y="38" text-anchor="middle" class="mono">L8</text><text x="570" y="38" text-anchor="middle" class="mono">L9</text><text x="630" y="38" text-anchor="middle" class="mono">L10</text><text x="690" y="38" text-anchor="middle" class="mono">L11</text>
+    <text x="750" y="38" text-anchor="middle" class="mono">L12</text><text x="810" y="38" text-anchor="middle" class="mono">L13</text><text x="870" y="38" text-anchor="middle" class="mono">L14</text><text x="930" y="38" text-anchor="middle" class="mono">L15</text>
+  </g>
+
+  <text x="40" y="220" class="head">Lane-group allocation within a selected beat</text>
+  <text x="40" y="248" class="small">Examples show one port word; scale is 15 pixels per byte. Padding is not written.</text>
+  <rect x="1030" y="205" width="28" height="20" class="used"/><text x="1068" y="222" class="small">used data bytes</text>
+  <rect x="1195" y="205" width="28" height="20" class="pad"/><text x="1233" y="222" class="small">tail padding</text>
+  <line x1="40" y1="265" x2="1360" y2="265" class="rule"/>
+
+  <text x="45" y="312" class="mono">W=13</text><text x="45" y="336" class="small">LC=1 · 4-byte group</text>
+  <rect x="250" y="287" width="30" height="55" class="used"/><rect x="280" y="287" width="30" height="55" class="pad"/>
+  <text x="325" y="312" class="text">2 data bytes + 2 unused bytes</text><text x="325" y="336" class="small">13 significant bits are LSB-justified in the group</text>
+  <line x1="40" y1="360" x2="1360" y2="360" class="rule"/>
+
+  <text x="45" y="407" class="mono">W=40</text><text x="45" y="431" class="small">LC=2 · 8-byte group</text>
+  <rect x="250" y="382" width="75" height="55" class="used"/><rect x="325" y="382" width="45" height="55" class="pad"/>
+  <text x="390" y="407" class="text">5 data bytes + 3 unused bytes</text><text x="390" y="431" class="small">Two aligned 32-bit lanes</text>
+  <line x1="40" y1="455" x2="1360" y2="455" class="rule"/>
+
+  <text x="45" y="502" class="mono">W=100</text><text x="45" y="526" class="small">LC=4 · 16-byte group</text>
+  <rect x="250" y="477" width="195" height="55" class="used"/><rect x="445" y="477" width="45" height="55" class="pad"/>
+  <text x="510" y="502" class="text">13 data bytes + 3 unused bytes</text><text x="510" y="526" class="small">100 significant bits are not rounded to a 128-bit interface</text>
+  <line x1="40" y1="550" x2="1360" y2="550" class="rule"/>
+
+  <text x="45" y="597" class="mono">W=300</text><text x="45" y="621" class="small">LC=16 · 64-byte group</text>
+  <rect x="250" y="572" width="570" height="55" class="used"/><rect x="820" y="572" width="390" height="55" class="pad"/>
+  <text x="535" y="608" text-anchor="middle" class="usedtext">38 data bytes (300 significant bits)</text>
+  <text x="1015" y="608" text-anchor="middle" class="padtext">26 unused bytes</text>
+  <line x1="40" y1="645" x2="1360" y2="645" class="rule"/>
+
+  <text x="45" y="692" class="mono">W=512</text><text x="45" y="716" class="small">LC=16 · full beat</text>
+  <rect x="250" y="667" width="960" height="55" class="used"/>
+  <text x="730" y="703" text-anchor="middle" class="usedtext">64 data bytes · no tail padding</text>
+
+  <text x="40" y="768" class="head">LC = 2^ceil(log2(ceil(W/32)))</text>
+  <text x="565" y="768" class="small">A lane group never straddles a beat; W remains the exact external port width.</text>
+</svg>

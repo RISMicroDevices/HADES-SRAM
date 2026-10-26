@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="800" viewBox="0 0 1400 800" role="img" aria-labelledby="title desc">
+  <title id="title">HADES-SRAM read and write timing</title>
+  <desc id="desc">A read accepted at edge E0 returns rvalid at E1 for latency one or E2 for latency two. A write accepted at E0 is posted and has no frontend response.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#245b78"/></marker>
+    <style>
+      .title{font-family:'DejaVu Sans',sans-serif;font-size:30px;font-weight:700;fill:#15364a}.head{font-family:'DejaVu Sans',sans-serif;font-size:20px;font-weight:700;fill:#15364a}.text{font-family:'DejaVu Sans',sans-serif;font-size:17px;fill:#253c48}.small{font-family:'DejaVu Sans',sans-serif;font-size:15px;fill:#415965}.mono{font-family:'DejaVu Sans Mono',monospace;font-size:16px;fill:#15364a}.edge{stroke:#acbdC8;stroke-width:1.5;stroke-dasharray:6 5}.clock{fill:none;stroke:#245b78;stroke-width:2.5}.data{fill:#edf4f8;stroke:#7691a2;stroke-width:1.5}.valid{fill:#2a8c94;stroke:#17636a;stroke-width:1.5}.write{fill:#e7eff8;stroke:#245b78;stroke-width:1.5}.label{font-family:'DejaVu Sans',sans-serif;font-size:16px;font-weight:700;fill:#15364a}.whitetext{font-family:'DejaVu Sans',sans-serif;font-size:17px;font-weight:700;fill:white}.note{fill:#f7f7fa;stroke:#9baab4;stroke-width:1.5}
+    </style>
+  </defs>
+  <text x="40" y="48" class="title">Frontend timing contract (port_clk domain)</text>
+  <text x="40" y="88" class="head">Read accepted at E0 · response phase selected by global L</text>
+
+  <text x="45" y="140" class="label">port_clk</text>
+  <path d="M250 140 H310 V115 H370 V140 H430 V115 H490 V140 H550 V115 H610 V140 H670 V115 H730 V140 H790 V115 H850 V140 H910 V115 H970 V140 H1030 V115 H1090 V140 H1150 V115 H1210 V140 H1270" class="clock"/>
+  <line x1="310" y1="100" x2="310" y2="520" class="edge"/><line x1="550" y1="100" x2="550" y2="520" class="edge"/><line x1="790" y1="100" x2="790" y2="520" class="edge"/><line x1="1030" y1="100" x2="1030" y2="520" class="edge"/><line x1="1270" y1="100" x2="1270" y2="520" class="edge"/>
+  <text x="310" y="171" text-anchor="middle" class="mono">E0</text><text x="550" y="171" text-anchor="middle" class="mono">E1</text><text x="790" y="171" text-anchor="middle" class="mono">E2</text><text x="1030" y="171" text-anchor="middle" class="mono">E3</text><text x="1270" y="171" text-anchor="middle" class="mono">E4</text>
+
+  <text x="45" y="215" class="label">en / we=0</text><rect x="310" y="188" width="240" height="38" class="data"/><text x="430" y="214" text-anchor="middle" class="text">read request</text>
+  <text x="45" y="267" class="label">addr</text><rect x="310" y="240" width="240" height="38" class="data"/><text x="430" y="266" text-anchor="middle" class="text">A</text>
+  <text x="45" y="329" class="label">rvalid (L=1)</text><rect x="550" y="301" width="240" height="42" class="valid"/><text x="670" y="329" text-anchor="middle" class="whitetext">valid</text>
+  <text x="45" y="381" class="label">rdata (L=1)</text><rect x="550" y="353" width="240" height="42" class="valid"/><text x="670" y="381" text-anchor="middle" class="whitetext">D(A)</text>
+  <text x="45" y="443" class="label">rvalid (L=2)</text><rect x="790" y="415" width="240" height="42" class="valid"/><text x="910" y="443" text-anchor="middle" class="whitetext">valid</text>
+  <text x="45" y="495" class="label">rdata (L=2)</text><rect x="790" y="467" width="240" height="42" class="valid"/><text x="910" y="495" text-anchor="middle" class="whitetext">D(A)</text>
+
+  <path d="M310 535 V558 H550" fill="none" stroke="#245b78" stroke-width="2" marker-end="url(#arrow)"/><text x="430" y="582" text-anchor="middle" class="small">L=1: first edge after acceptance</text>
+  <path d="M550 535 H790" fill="none" stroke="#245b78" stroke-width="2" marker-end="url(#arrow)"/><text x="905" y="558" class="small">L=2: second edge after acceptance</text>
+
+  <line x1="40" y1="605" x2="1360" y2="605" stroke="#ccd8df" stroke-width="2"/>
+  <text x="40" y="647" class="head">Write accepted at E0 · posted operation</text>
+  <text x="45" y="695" class="label">en / we=1</text><rect x="310" y="668" width="240" height="38" class="write"/><text x="430" y="694" text-anchor="middle" class="text">write request</text>
+  <text x="45" y="747" class="label">addr / wdata / be</text><rect x="310" y="720" width="240" height="38" class="write"/><text x="430" y="746" text-anchor="middle" class="text">A / D(A) / byte mask</text>
+  <rect x="720" y="665" width="580" height="93" rx="8" class="note"/>
+  <text x="745" y="700" class="head">No frontend write response</text>
+  <text x="745" y="730" class="text">The request enters the write FIFO and is posted to the backend.</text>
+  <path d="M550 687 H720" fill="none" stroke="#245b78" stroke-width="2.5" marker-end="url(#arrow)"/>
+</svg>

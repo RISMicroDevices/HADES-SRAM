@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="800" viewBox="0 0 1400 800" role="img" aria-labelledby="title desc">
+  <title id="title">HADES-SRAM core architecture</title>
+  <desc id="desc">Separated SRAM ports connect through request FIFOs, exact latency timing shapers, TDMA arbitration and an AXI4 adapter to an external MIG DDR4 controller. Configuration, refresh, backdoor and self-test blocks surround the datapath.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#245b78"/></marker>
+    <marker id="arrowTeal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#087f8c"/></marker>
+    <style>
+      .title{font-family:'DejaVu Sans',sans-serif;font-size:30px;font-weight:700;fill:#15364a}.domain{font-family:'DejaVu Sans',sans-serif;font-size:18px;font-weight:700;fill:#527083}.box{fill:#f3f8fb;stroke:#245b78;stroke-width:2}.box2{fill:#edf8f7;stroke:#087f8c;stroke-width:2}.aux{fill:#f7f7fa;stroke:#6c7480;stroke-width:1.8}.external{fill:#fff7e8;stroke:#9a6617;stroke-width:2}.heading{font-family:'DejaVu Sans',sans-serif;font-size:20px;font-weight:700;fill:#15364a}.text{font-family:'DejaVu Sans',sans-serif;font-size:16px;fill:#253c48}.small{font-family:'DejaVu Sans',sans-serif;font-size:14px;fill:#415965}.flow{fill:none;stroke:#245b78;stroke-width:3;marker-end:url(#arrow)}.response{fill:none;stroke:#087f8c;stroke-width:3;marker-end:url(#arrowTeal)}.control{fill:none;stroke:#6c7480;stroke-width:2;stroke-dasharray:7 5;marker-end:url(#arrow)}.boundary{fill:none;stroke:#b7c6cf;stroke-width:2;stroke-dasharray:9 7}
+    </style>
+  </defs>
+  <text x="40" y="48" class="title">HADES-SRAM core architecture</text>
+  <rect x="30" y="78" width="610" height="650" rx="12" class="boundary"/>
+  <rect x="660" y="78" width="710" height="650" rx="12" class="boundary"/>
+  <text x="50" y="108" class="domain">port_clk domain · 100–500 KHz</text>
+  <text x="680" y="108" class="domain">ui_clk domain · nominal 300 MHz</text>
+
+  <rect x="55" y="150" width="235" height="380" rx="9" class="box"/>
+  <text x="78" y="184" class="heading">Separated SRAM ports</text>
+  <text x="78" y="218" class="text">sram0 … sram&lt;i&gt; … sram63</text>
+  <text x="78" y="254" class="text">N = 1–64 interfaces</text>
+  <text x="78" y="286" class="text">W&lt;i&gt; = 1–512 bits</text>
+  <text x="78" y="326" class="small">Inputs: en, we, addr,</text>
+  <text x="78" y="349" class="small">wdata, byte enables</text>
+  <text x="78" y="397" class="small">Outputs: rdata, rvalid</text>
+  <text x="78" y="444" class="small">Independent width and</text>
+  <text x="78" y="467" class="small">BE setting per port</text>
+  <text x="78" y="507" class="small">One operation per cycle</text>
+
+  <rect x="370" y="145" width="230" height="132" rx="9" class="box"/>
+  <text x="392" y="180" class="heading">Request capture</text>
+  <text x="392" y="213" class="text">Read/write FIFOs</text>
+  <text x="392" y="241" class="text">8 entries per direction</text>
+  <text x="392" y="265" class="small">CDC whitelist / timed paths</text>
+
+  <rect x="370" y="382" width="230" height="145" rx="9" class="box2"/>
+  <text x="392" y="417" class="heading">Response handling</text>
+  <text x="392" y="450" class="text">Four hold slots per port</text>
+  <text x="392" y="480" class="text">Exact-L timing shaper</text>
+  <text x="392" y="508" class="small">L = 1 or 2 port_clk cycles</text>
+
+  <rect x="705" y="240" width="220" height="135" rx="9" class="box"/>
+  <text x="728" y="275" class="heading">TDMA arbitration</text>
+  <text x="728" y="308" class="text">Static port slots</text>
+  <text x="728" y="337" class="text">Outstanding requests</text>
+  <text x="728" y="361" class="small">Elaboration budget guard</text>
+
+  <rect x="1020" y="240" width="175" height="135" rx="9" class="box"/>
+  <text x="1042" y="275" class="heading">MIG adapter</text>
+  <text x="1042" y="308" class="text">AXI4 · 512 bits</text>
+  <text x="1042" y="337" class="text">40-bit byte address</text>
+  <text x="1042" y="361" class="small">One beat per operation</text>
+
+  <rect x="1240" y="240" width="115" height="135" rx="9" class="external"/>
+  <text x="1255" y="275" class="heading">External</text>
+  <text x="1255" y="308" class="text">MIG +</text>
+  <text x="1255" y="337" class="text">DDR4</text>
+  <text x="1255" y="361" class="small">not bundled</text>
+
+  <rect x="705" y="130" width="255" height="80" rx="9" class="aux"/>
+  <text x="728" y="162" class="heading">Configuration</text>
+  <text x="728" y="191" class="text">AXI4-Lite CSR or static parameters</text>
+
+  <rect x="690" y="535" width="235" height="110" rx="9" class="aux"/>
+  <text x="713" y="570" class="heading">Maintenance and health</text>
+  <text x="713" y="601" class="text">Refresh / ZQCS scheduling</text>
+  <text x="713" y="628" class="small">Clock monitor and response sentinel</text>
+
+  <rect x="985" y="535" width="220" height="110" rx="9" class="aux"/>
+  <text x="1008" y="570" class="heading">Backdoor</text>
+  <text x="1008" y="601" class="text">Lowest-priority access</text>
+  <text x="1008" y="628" class="small">32-bit lane commands</text>
+
+  <rect x="370" y="580" width="230" height="80" rx="9" class="aux"/>
+  <text x="392" y="613" class="heading">Optional self-test</text>
+  <text x="392" y="642" class="text">Per-port PRBS and phase checks</text>
+
+  <path d="M290 215 H330 V205 H370" class="flow"/>
+  <path d="M600 211 H650 V290 H705" class="flow"/>
+  <path d="M925 307 H1020" class="flow"/>
+  <path d="M1195 307 H1240" class="flow"/>
+  <text x="956" y="294" class="small">requests</text>
+
+  <path d="M1295 375 V450 H600" class="response"/>
+  <path d="M370 455 H315 V420 H290" class="response"/>
+  <text x="965" y="438" class="small">read responses</text>
+
+  <path d="M795 210 V240" class="control"/>
+  <path d="M705 185 H640 V455 H600" class="control"/>
+  <path d="M805 535 V375" class="control"/>
+  <path d="M925 565 H1220 V350 H1240" class="control"/>
+  <text x="1020" y="520" class="small">app_ref / app_zq</text>
+  <path d="M1095 535 V375" class="control"/>
+  <path d="M370 620 H180 V530" class="control"/>
+
+  <text x="55" y="700" class="small">All emulated interfaces share port_clk and one global read-latency setting.</text>
+  <text x="680" y="700" class="small">Configuration and response payloads are quasi-static while traffic is enabled.</text>
+</svg>

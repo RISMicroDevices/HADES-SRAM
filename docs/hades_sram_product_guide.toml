@@ -1,0 +1,8 @@
+source = "hades_sram_product_guide.md"
+output = "hades_sram_product_guide.pdf"
+title = "HADES-SRAM v1.1"
+type = "IP Product Guide"
+revision = "v1.1.0"
+vendor = "rismd.cn"
+date = "2026-10-25"
+subject = "Separated deterministic-latency SRAM interfaces backed by one MIG DDR4 channel"
