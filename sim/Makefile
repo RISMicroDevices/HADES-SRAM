@@ -3,6 +3,10 @@
 #   make SIM=xsim     -> same tests under Vivado xsim (reduced OPS)
 #   make lint         -> xvlog/xelab elaboration gate, both CSR_EN variants
 #   make check_bounds -> static slot-budget assertion spot-checks (T11)
+#   make check_generator -> generator unit/API tests + generated RTL smoke
+#   make check_generator_ip -> generated Vivado IP + fake-host CSR checks
+#   make check_wizard  -> native Eclipse SRAM integration tests + provider packaging
+#   make check_wizard_windows -> native Windows tests + packaged GUI workflows
 #   make clean
 #
 # Variants:  csr (CSR_EN=1 SYNC) | csr_async (CSR_EN=1 ASYNC) |
@@ -20,6 +24,14 @@ VCS      := /home/kumon/Synopsys/vcs/X-2025.06/bin/vcs
 VIVADO   := /home/kumon/Xilinx/Vivado/2024.1
 VIVADO_BIN := $(VIVADO)/bin
 BUILD    := build
+WIZARD   ?= ../../HADES-Wizard
+WIZARD_ABS := $(abspath $(WIZARD))
+WIZARD_JAVA_HOME := $(WIZARD_ABS)/.toolchain/jdk-21.0.9+10-linux-x64
+WIZARD_DESCRIPTOR := $(abspath ../tools/hades_sram_wizard.json)
+WIZARD_POWERSHELL ?= powershell.exe
+WIZARD_WINDOWS_PYTHON ?= python3
+WIZARD_DESCRIPTOR_WIN = $(shell wslpath -w "$(WIZARD_DESCRIPTOR)")
+WIZARD_VERIFY_WIN = $(shell wslpath -w "$(WIZARD_ABS)/scripts/verify-windows.ps1")
 
 RTL := ../rtl/hades_sram_pkg.sv ../rtl/hades_sram_cdc.sv ../rtl/hades_sram_freq_mon.sv \
        ../rtl/hades_sram_selftest.sv ../rtl/hades_sram_csr.sv ../rtl/hades_sram_port.sv \
@@ -38,12 +50,12 @@ CPP_ABS := $(abspath $(CPP))
 OPS_vcs  := 100000
 OPS_xsim := 10000
 
-.PHONY: test test-vcs test-xsim lint check_bounds cov clean
-# the one-command gate (spec section 7): full suite + bounds; coverage on VCS
+.PHONY: test test-vcs test-xsim lint check_bounds check_generator check_generator_ip check_wizard check_wizard_windows cov clean
+# the one-command gate (spec section 7): generator + full suite + bounds; coverage on VCS
 ifeq ($(SIM),vcs)
-test: test-$(SIM) check_bounds cov
+test: check_generator test-$(SIM) check_bounds cov
 else
-test: test-$(SIM) check_bounds
+test: check_generator test-$(SIM) check_bounds
 endif
 
 # ----------------------------------------------------------------- VCS -----
@@ -322,6 +334,28 @@ check_bounds:
 	  && $(VIVADO_BIN)/xelab --timescale 1ns/1ps hades_sram_top -generic_top "N=128" \
 	    -generic_top "TARGET_PERIOD_CYCLES=3000" >> nb_xpass.log 2>&1 \
 	  && echo "PASS: xelab accepted N=128@100KHz" || { echo "FAIL: N=128@100KHz should elaborate (xelab)"; exit 1; }
+
+check_generator:
+	@PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s ../tools/tests -v
+	@PYTHONDONTWRITEBYTECODE=1 python3 ../tools/tests/run_generated_rtl.py --sim $(SIM)
+
+check_generator_ip:
+	@PYTHONDONTWRITEBYTECODE=1 python3 ../tools/tests/run_generator_ip.py
+
+check_wizard:
+	@test -x "$(WIZARD_ABS)/mvnw" || { echo "HADES-Wizard not found at $(WIZARD_ABS); set WIZARD=/path/to/HADES-Wizard"; exit 1; }
+	@test -x "$(WIZARD_JAVA_HOME)/bin/java" || { echo "Wizard JDK not found at $(WIZARD_JAVA_HOME); run $(WIZARD_ABS)/scripts/bootstrap-jdk.sh"; exit 1; }
+	@cd "$(WIZARD_ABS)" && JAVA_HOME="$(WIZARD_JAVA_HOME)" PATH="$(WIZARD_JAVA_HOME)/bin:$$PATH" \
+	  ./mvnw clean verify -Phades-sram-integration \
+	  -Dhades.sram.descriptor="$(WIZARD_DESCRIPTOR)" -Dhades.sram.python=python3
+	@cd "$(WIZARD_ABS)" && JAVA_HOME="$(WIZARD_JAVA_HOME)" PATH="$(WIZARD_JAVA_HOME)/bin:$$PATH" \
+	  ./scripts/package-provider.sh "$(WIZARD_DESCRIPTOR)"
+
+check_wizard_windows:
+	@test -f "$(WIZARD_ABS)/scripts/verify-windows.ps1" || { echo "HADES-Wizard not found at $(WIZARD_ABS); set WIZARD=/path/to/HADES-Wizard"; exit 1; }
+	@command -v wslpath >/dev/null || { echo "wslpath is required for Windows path conversion"; exit 1; }
+	@cd "$(WIZARD_ABS)" && "$(WIZARD_POWERSHELL)" -NoProfile -ExecutionPolicy Bypass -Command \
+	  'try { & "$(WIZARD_VERIFY_WIN)" -Descriptor "$(WIZARD_DESCRIPTOR_WIN)" -Python "$(WIZARD_WINDOWS_PYTHON)" } catch { Write-Host $$_.Exception.Message; exit 1 }'
 
 clean:
 	rm -rf $(BUILD)
