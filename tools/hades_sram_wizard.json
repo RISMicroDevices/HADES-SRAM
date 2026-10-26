@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": 1,
+  "id": "cn.rismd.hades.sram",
+  "version": "1.0.0",
+  "vlnv": "rismd.cn:hades:hades_sram:1.1",
+  "display": {
+    "name": "HADES-SRAM Configuration",
+    "description": "Configure separated SRAM ports, analytical timing, maintenance, and generated RTL or IP artifacts.",
+    "help": "Timing and bandwidth are analytical estimates, not implementation or board signoff. See docs/hades_sram_generator.md for integration guidance."
+  },
+  "backend": {
+    "entryPoint": "hades-sram-gen"
+  },
+  "addressing": {
+    "automaticLabel": "Automatic (packed)",
+    "manualLabel": "Manual (preserve bases)",
+    "baseField": "base_beats",
+    "depthField": "depth",
+    "sizeField": "size_lanes"
+  },
+  "pages": [
+    {
+      "id": "integration",
+      "kind": "integration",
+      "title": "Integration",
+      "description": "Select the generated target and integration contract.",
+      "fields": [
+        {"id":"target","label":"&Target:","description":"rtl emits standalone RTL; ip emits configure Tcl and a wrapper for an already packaged Vivado catalog IP.","type":"CHOICE","required":true,"choices":["rtl","ip"]},
+        {"id":"module_name","label":"&Module name:","description":"SystemVerilog top-level module identifier.","type":"STRING","required":true},
+        {"id":"ip_name","label":"&IP name:","description":"Vivado IP name; used only for the ip target.","type":"STRING","required":true},
+        {"id":"configuration_mode","label":"&Configuration mode:","description":"CSR enables runtime registers; STATIC uses hard-wired parameters.","type":"CHOICE","required":true,"choices":["CSR","STATIC"]},
+        {"id":"port_count","label":"Physical &ports:","description":"Number of separated SRAM interfaces. Backend bounds apply.","type":"INTEGER","required":true},
+        {"id":"address_width","label":"&Address width (bits):","description":"Frontend word-address width.","type":"INTEGER","required":true}
+      ]
+    },
+    {
+      "id": "ports",
+      "kind": "ports",
+      "title": "SRAM Ports",
+      "description": "Edit width, depth, enables, and automatic or manual backend addressing.",
+      "fields": [
+        {"id":"address_mode","label":"Address &mode:","description":"Automatic packs and normalizes on explicit edits; Manual preserves concrete bases and raw tails.","type":"CHOICE","required":true,"choices":["Automatic","Manual"]},
+        {"id":"width","label":"&Width (bits):","description":"Frontend width for the selected port.","type":"INTEGER","required":true},
+        {"id":"depth","label":"&Depth (frontend words):","description":"Capacity in frontend words; backend derives lane counts and raw size.","type":"INTEGER","required":true},
+        {"id":"base_beats","label":"&Base (64-byte beats):","description":"Manual backend base; Automatic mode keeps this read-only.","type":"INTEGER","required":true},
+        {"id":"byte_enable","label":"&Byte enable","description":"Expose byte-write enables for this port.","type":"BOOLEAN","required":false},
+        {"id":"enabled","label":"&Enabled","description":"Include this physical port in the active schedule.","type":"BOOLEAN","required":false}
+      ]
+    },
+    {
+      "id": "clock",
+      "kind": "clock",
+      "title": "Clock & Latency",
+      "description": "Configure the shared port clock, read latency, and analytical period model.",
+      "fields": [
+        {"id":"clock_mode","label":"Clock &mode:","description":"SYNC requires same-source static-phase clocks; ASYNC uses the CDC integration.","type":"CHOICE","required":true,"choices":["SYNC","ASYNC"]},
+        {"id":"port_clock_hz","label":"Port clock (&Hz):","description":"Requested external port clock, typically 100000–500000 Hz; backend bounds apply.","type":"INTEGER","required":true},
+        {"id":"read_latency","label":"Read &latency (cycles):","description":"Exact frontend response latency in port clock cycles.","type":"CHOICE","required":true,"choices":["1","2"]},
+        {"id":"target_period_cycles","label":"&Target period (ui_clk cycles):","description":"Manual schedule target; editing disables automatic derivation.","type":"INTEGER","required":true},
+        {"id":"min_period_cycles","label":"M&inimum period (ui_clk cycles):","description":"Manual clock-monitor minimum; editing disables automatic derivation.","type":"INTEGER","required":true}
+      ]
+    },
+    {
+      "id": "maintenance",
+      "kind": "maintenance",
+      "title": "Maintenance & Self-Test",
+      "description": "Configure refresh, ZQ calibration, and optional built-in self-test.",
+      "fields": [
+        {"id":"selftest_enabled","label":"Enable &self-test","description":"Self-test supports only 32/64-bit widths for EVERY PHYSICAL PORT, including runtime-disabled ports.","type":"BOOLEAN","required":false},
+        {"id":"selftest_block_words","label":"Self-test &block (frontend words):","description":"Words per self-test block.","type":"INTEGER","required":true},
+        {"id":"refresh_cycles","label":"&Refresh period (ui_clk cycles):","description":"Refresh scheduler interval; derived time appears below.","type":"INTEGER","required":true},
+        {"id":"zq_periods","label":"&ZQ calibration (port_clk periods):","description":"ZQ calibration interval; derived time appears below.","type":"INTEGER","required":true}
+      ]
+    },
+    {
+      "id": "review",
+      "kind": "review",
+      "title": "Review & Generate",
+      "description": "Review diagnostics, analytical timing, memory layout, bandwidth, and read-only artifacts before generation.",
+      "fields": [
+        {"id":"output","label":"&Output directory:","description":"Destination for generated artifacts; nothing is written before Finish.","type":"STRING","required":true},
+        {"id":"force","label":"&Overwrite existing managed artifacts","description":"Allow generation to replace its managed output set.","type":"BOOLEAN","required":false},
+        {"id":"full_copy","label":"&Copy complete integration sources","description":"Copy all maintained RTL, clock constraints, and integration references. Uncheck for configuration-specific artifacts only.","type":"BOOLEAN","required":false}
+      ]
+    }
+  ],
+  "reports": [
+    {"id":"diagnostics","title":"Diagnostics","description":"Backend errors and warnings with exact configuration paths."},
+    {"id":"timing","title":"Exact-L timing and TDMA schedule","description":"Raw analytical clock, latency, budget, and nominal slot values."},
+    {"id":"memory","title":"Memory map and backend window padding","description":"Raw base, size, tail, padding, and capacity values for every port."},
+    {"id":"bandwidth","title":"Configured bandwidth","description":"Configured frontend and allocated backend demand, not measured throughput."},
+    {"id":"artifacts","title":"Read-only artifact preview","description":"Ordered in-memory generated source artifacts; preview performs no writes."}
+  ]
+}

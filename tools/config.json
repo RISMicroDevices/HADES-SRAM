@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "target": "rtl",
+  "module_name": "hades_sram_user",
+  "ip_name": "hades_sram_0",
+  "port_count": 1,
+  "address_width": 22,
+  "clock_mode": "SYNC",
+  "configuration_mode": "CSR",
+  "port_clock_hz": 500000,
+  "target_period_cycles": 600,
+  "min_period_cycles": 600,
+  "read_latency": 2,
+  "selftest_enabled": false,
+  "selftest_block_words": 256,
+  "refresh_cycles": 2100,
+  "zq_periods": 32000,
+  "ports": [
+    {
+      "width": 32,
+      "byte_enable": false,
+      "enabled": true,
+      "base_beats": 0,
+      "size_lanes": 4194304
+    }
+  ]
+}
