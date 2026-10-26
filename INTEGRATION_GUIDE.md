@@ -2,6 +2,8 @@
 
 HADES-SRAM is part of **HADES (Hybrid Accelerated and Distributed Emulation System)**. The core presents independent synchronous-SRAM interfaces in the `port_clk` domain and shares one AMD/Xilinx MIG DDR4 channel through an AXI4 backend.
 
+For the complete interface, register, design-flow, testbench, example-design, verification, and debugging reference, see the [IP Product Guide](docs/hades_sram_product_guide.md) ([PDF](docs/hades_sram_product_guide.pdf)).
+
 ## 1. Core capabilities
 
 - 1–64 separated ports (`N_MAX=64`), default `N=1`.
@@ -11,7 +13,7 @@ HADES-SRAM is part of **HADES (Hybrid Accelerated and Distributed Emulation Syst
 - Shared `port_clk` at 100–500 KHz and `ui_clk` at 300 MHz.
 - `IS_SYNC=1` for phase-related clocks or `IS_SYNC=0` for independent clocks.
 - AXI4-Lite CSR (`CSR_EN=1`) or static parameter configuration (`CSR_EN=0`).
-- Optional per-port self-test and low-priority backdoor access.
+- Optional per-port self-test for 32/64-bit physical ports and low-priority backdoor access.
 
 Physical port count, widths, byte-enable switches, address width, and clock mode are **elaboration-time settings**. CSR cannot create physical ports, change their widths, or enable byte enables at runtime. Runtime port masks, latency, address windows, and refresh settings do not change the physical interface.
 
@@ -23,7 +25,7 @@ Generate and verify the catalog package:
 vivado -mode batch -source ip/package_ip.tcl
 ```
 
-This creates `ip/hades_sram_1.0/` as a generated Vivado work product. The core VLNV is `rismd.cn:hades:hades_sram:1.1`; the directory name is not the core version. Maintained sources remain in `rtl/`, `constraints/`, `csr/`, and `ip/xgui/`.
+This creates `ip/hades_sram_1.0/` as a generated Vivado work product. The core VLNV is `rismd.cn:hades:hades_sram:1.1`; the directory name is not the core version. Maintained sources remain in `rtl/`, `constraints/`, `csr/`, `ip/xgui/`, `tools/`, and `docs/`. The packaged documentation and `tools/` directories are generated staging copies.
 
 Register that directory in a Vivado project:
 
@@ -43,6 +45,27 @@ vivado -source ip/open_ip_gui.tcl
 The GUI has General, SRAM Ports, Maintenance, and Static Addressing pages. Ports are grouped in pages of eight, with expandable per-port groups, width fields, and byte-enable checkboxes. Each `sram<i>` block-diagram interface is an expandable tag containing its request, response, address, data, and byte-enable signals.
 
 The GUI helper creates the IP instance before opening the customization dialog after GUI initialization. Do not invoke `start_ip_gui` during Vivado startup and then immediately exit the session; allow the deferred dialog to open.
+
+## 2.1 Configuration code generator
+
+Use the shared-kernel CLI or native HADES-Wizard Eclipse application to validate parameters and generate direct-RTL or packaged-IP wrappers:
+
+```sh
+./tools/hades-sram-gen init --output config.json
+./tools/hades-sram-gen analyze --config config.json
+./tools/hades-sram-gen generate --config config.json --output generated/hades_sram
+./tools/hades-sram-gen gui --config config.json --output generated/hades_sram
+```
+
+The native launcher checks `HADES_WIZARD`, `HADES_WIZARD_HOME`, then the sibling HADES-Wizard product. The app requires Python 3.11+ for the backend and includes its Java runtime in packaged Linux and Windows products. Run `make -C sim check_wizard_windows` to build and exercise the native Windows application and its packaged Automatic/Manual GUI workflows.
+
+Generation copies the complete integration payload by default: maintained RTL, both clock-mode constraints, and integration/CSR references, plus all configuration-specific artifacts. Use CLI `--no-full-copy` or clear the native **Copy complete integration sources** checkbox to omit maintained-source copies. Generated and copied RTL is under `logical/`; analytical reports are under `report/`. Root `wrapper.f` lists the generated package/wrapper, while full-copy `static_rtl.f` separately lists unchanging core RTL in compile order. Run filelist-based tools from the generated root.
+
+Every configured physical port has `constraints/sram<i>_strict.xdc`, independently of runtime enables and full-copy selection. Each file applies explicit maximum/minimum input and output delays to all SRAM pins against `port_clk`, including byte-enable pins. Its conservative 0 ns external-delay baseline is an editable integration budget, not a board measurement. Define the actual clocks before loading these files, review the budgets for the external logic, and use them together with the selected SYNC/ASYNC constraints; they add no false-path, clock-group, or multicycle exceptions and do not prove timing closure.
+
+The five native pages cover Integration, SRAM Ports, Clock & Latency, Maintenance & Self-Test, and Review & Generate. The shared left-hand **Module Port Preview** is also present in the main window. It supports drag-to-pan, bounded zoom, fit/reset, expandable per-SRAM and AXI/AXI-Lite groups, and a synchronized accessible tree. Successful Finish displays a generation-complete dialog. Native plots and read-only artifact previews use the same backend analysis as the CLI; preview performs no writes and is invalidated on edits.
+
+See [Code Generator Guide](docs/hades_sram_generator.md) for complete CLI flags, filelist examples, launch/product commands, the provider/protocol boundary, and safe generation. Generated analysis is not post-route timing closure or hardware qualification. Static enable masks must be contiguous from port zero; use CSR for sparse masks. Self-test inclusion is limited to 32/64-bit physical ports.
 
 ## 3. SRAM interfaces
 
@@ -94,13 +117,24 @@ Defaults per port:
 - At `W=64`, `LC=2`, this is `2^21` port words = 16 MiB.
 - At `W=40`, `LC=2`, this is `2^21` port words = 10 MiB because each 64-bit group has only 40 useful bits.
 
-Widths do not automatically resize the address map. Adjust bases and sizes when changing the desired capacity or avoiding overlap. The backend applies the used-byte mask and optional byte enables without writing unused tail bytes.
+Widths do not automatically resize the address map in the RTL or raw JSON schema. Adjust bases and sizes when changing the desired capacity or avoiding overlap. The backend applies the used-byte mask and optional byte enables without writing unused tail bytes.
+
+### Native frontend-depth allocation
+
+Both native wizard address modes accept depth in frontend `W`-bit words and use `size_lanes = depth * LC`. Automatic allocation includes every physical port, including runtime-disabled ports, and assigns:
+
+```
+base[0]   = 0
+base[i+1] = base[i] + ceil(size_lanes[i] / 16)
+```
+
+Manual mode permits base edits without relocation; an explicit depth/width edit changes only that port's size and preserves every base and unedited port. Existing files open in Manual mode. Raw legacy size tails are preserved until an explicit depth/width edit or confirmed Automatic allocation. The UI mode is not a schema, RTL, CSR, or runtime setting. CLI users can express either map directly with `--port-base-beats` and `--port-size-lanes`; see the Code Generator Guide.
 
 ## 5. Clocks, resets, and CDC
 
 - `ui_clk` is 300 MHz for backend logic, CSR, and the MIG user interface.
 - All emulated ports share one `port_clk`, 100–500 KHz.
-- `ui_rst_n` and `port_rst_n` are active-low synchronous resets. Hold the datapath in reset until MIG calibration is stable.
+- `ui_rst_n` and `port_rst_n` are active-low external reset inputs. Each domain uses asynchronous assertion and synchronous release through its reset synchronizer; functional logic uses synchronous internal resets. Hold the datapath in reset until MIG calibration is stable.
 
 ### SYNC (`IS_SYNC=1`)
 

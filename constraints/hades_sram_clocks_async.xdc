@@ -1,8 +1,8 @@
 # =============================================================================
 # HADES-SRAM — IP constraints, CLK_MODE=ASYNC variant.
-# Loaded automatically by package_ip.tcl when the core is built with
-# IS_SYNC=0.  All names reference only IP ports / internal cells — safe for
-# any integrator.
+# Not selected automatically by package_ip.tcl. When IS_SYNC=0, disable the
+# packaged SYNC constraint and add this file to the active constraint set.
+# All names reference only IP ports / internal cells — safe for any integrator.
 #
 # ui_clk (300 MHz MIG user clock) and port_clk (100-500 KHz, independent
 # source) are asynchronous; only the whitelist cells of rtl/hades_sram_cdc.sv

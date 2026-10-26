@@ -60,7 +60,7 @@ Default bases provide 16 MiB of address spacing per port. Default sizes span 16 
 
 ## On-chip self-test (`SELFTEST_EN=1`)
 
-Each implemented port has a `port_clk`-domain checker. `CTRL.SELFTEST` starts all enabled ports: each writes and reads `SELFTEST_BLK` words with a per-port PRBS pattern and checks exact response phase and data. Errors increment `PORT_STAT_ERR`; they do not set `ERR_STATUS`.
+Each implemented port has a `port_clk`-domain checker. The current pattern generator supports 32- or 64-bit physical ports only; do not include self-test with other widths. `CTRL.SELFTEST` starts all enabled ports: each writes and reads `SELFTEST_BLK` words with a per-port PRBS pattern and checks exact response phase and data. Errors increment `PORT_STAT_ERR`; they do not set `ERR_STATUS`.
 
 Stop `SELFTEST` and wait at least 16 `port_clk` periods before clearing ENABLE or issuing `SOFT_RESET`. In the static variant, self-test runs automatically when enabled; its per-port counters have no bus readout.
 
