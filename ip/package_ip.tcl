@@ -7,7 +7,9 @@
 # VLNV version 1.1, default CLK_MODE=SYNC), bundling:
 #   - rtl/*.sv (product RTL only; board/fpga files are NOT part of the IP)
 #   - the custom SRAM bus/abstraction definitions under interfaces/
-#   - constraints/hades_sram_clocks_{sync,async}.xdc and csr/csr_regmap.md
+#   - constraints/hades_sram_clocks_{sync,async}.xdc, csr/csr_regmap.md, and INTEGRATION_GUIDE.md
+#   - the IP Product Guide (Markdown/PDF), its manifest, and figures
+#   - the Code Generator Guide and a staging copy of tools/ (shared CLI/native-Eclipse kernel)
 # Verification: catalog import, N-dependent IPI interface tags, and packaged-
 # source OOC synthesis at both the default and a mixed-width/BE configuration.
 # =============================================================================
@@ -16,6 +18,51 @@ set here [file dirname [file normalize [info script]]]
 set root [file normalize $here/..]
 set outdir [file normalize $here/hades_sram_1.0]
 set work [file normalize $here/work_pkg]
+
+set product_docs [list \
+  [file join $root docs hades_sram_product_guide.md] \
+  [file join $root docs hades_sram_product_guide.pdf] \
+  [file join $root docs hades_sram_product_guide.toml] \
+  [file join $root docs hades_sram_generator.md]]
+set product_images [list \
+  [file join $root docs images hades_sram_overview.svg] \
+  [file join $root docs images hades_sram_lane_mapping.svg] \
+  [file join $root docs images hades_sram_timing.svg] \
+  [file join $root docs images hades_sram_gui_ports.png] \
+  [file join $root docs images hades_sram_wizard_ports.png] \
+  [file join $root docs images hades_sram_wizard_clock.png] \
+  [file join $root docs images hades_sram_wizard_review.png] \
+  [file join $root docs images hades_sram_wizard_memory.png]]
+set generator_files [list \
+  [file join tools hades-sram-gen] \
+  [file join tools hades_sram_wizard.json] \
+  [file join tools hades_sram_gen __init__.py] \
+  [file join tools hades_sram_gen __main__.py] \
+  [file join tools hades_sram_gen allocate.py] \
+  [file join tools hades_sram_gen analyze.py] \
+  [file join tools hades_sram_gen cli.py] \
+  [file join tools hades_sram_gen contract.py] \
+  [file join tools hades_sram_gen emit_constraints.py] \
+  [file join tools hades_sram_gen emit_report.py] \
+  [file join tools hades_sram_gen emit_sv.py] \
+  [file join tools hades_sram_gen emit_svg.py] \
+  [file join tools hades_sram_gen emit_tcl.py] \
+  [file join tools hades_sram_gen generate.py] \
+  [file join tools hades_sram_gen model.py] \
+  [file join tools hades_sram_gen native_gui.py] \
+  [file join tools hades_sram_gen output.py] \
+  [file join tools hades_sram_gen parameters.py] \
+  [file join tools hades_sram_gen payload.py] \
+  [file join tools hades_sram_gen protocol.py] \
+  [file join tools hades_sram_gen service.py] \
+  [file join tools hades_sram_gen validate.py]]
+foreach f [concat $product_docs $product_images $generator_files [list [file join $root INTEGRATION_GUIDE.md]]] {
+  if {![file exists $f]} {
+    puts "HADES-IP FAIL: missing documentation/generator payload $f"
+    puts "Render the Product Guide with: ../HADES-Doc/bin/hades-doc render docs/hades_sram_product_guide.toml"
+    exit 1
+  }
+}
 
 file delete -force $work $outdir
 file mkdir $work
@@ -212,10 +259,22 @@ foreach {name text} {
 # building with IS_SYNC=0 swaps it in for the SYNC one (see the file headers
 # and INTEGRATION_GUIDE.md) — the 2024.1 packager API has no
 # parameter-conditional file enablement, so the swap is a documented step.
-file mkdir $outdir/doc
+file mkdir $outdir/doc $outdir/doc/images
 file copy -force $root/constraints/hades_sram_clocks_sync.xdc  $outdir/doc/
 file copy -force $root/constraints/hades_sram_clocks_async.xdc $outdir/doc/
 file copy -force $root/csr/csr_regmap.md                  $outdir/doc/
+
+set packaged_doc_files {}
+file copy -force $root/INTEGRATION_GUIDE.md $outdir/doc/
+lappend packaged_doc_files [file join $outdir doc INTEGRATION_GUIDE.md]
+foreach f $product_docs {
+  file copy -force $f $outdir/doc/
+  lappend packaged_doc_files [file join $outdir doc [file tail $f]]
+}
+foreach f $product_images {
+  file copy -force $f $outdir/doc/images/
+  lappend packaged_doc_files [file join $outdir doc images [file tail $f]]
+}
 
 set synth_grp ""
 foreach g [ipx::get_file_groups -of_objects $core] {
@@ -227,6 +286,22 @@ ipx::add_file $outdir/doc/hades_sram_clocks_sync.xdc $synth_grp
 set f_doc_grp [ipx::add_file_group -type documentation hades_doc $core]
 ipx::add_file $outdir/doc/csr_regmap.md $f_doc_grp
 ipx::add_file $outdir/doc/hades_sram_clocks_async.xdc $f_doc_grp
+foreach f $packaged_doc_files { ipx::add_file $f $f_doc_grp }
+
+# The supported generator has one maintained source tree under tools/.  This is
+# a disposable packaging-stage copy, not a second maintained implementation.
+set generator_payload {}
+foreach f $generator_files {
+  set relative $f
+  set dst [file normalize [file join $outdir $relative]]
+  file mkdir [file dirname $dst]
+  file copy -force $f $dst
+  ipx::add_file $dst $f_doc_grp
+  lappend generator_payload $dst
+}
+if {$::tcl_platform(platform) eq "unix"} {
+  file attributes $outdir/tools/hades-sram-gen -permissions 0755
+}
 
 # ---- AXI4-Lite memory map: reserve a 64 KiB CSR window.
 set mmaps [ipx::get_memory_maps -of_objects $core]
@@ -257,8 +332,8 @@ set defs [get_ipdefs -quiet rismd.cn:hades:hades_sram:1.1]
 if {![llength $defs]} { puts "HADES-IP FAIL: core 1.1 not in catalog"; exit 1 }
 puts "HADES-IP: catalog sees $defs"
 
-foreach f [list $ifdir/hades_sram.xml $ifdir/hades_sram_rtl.xml \
-                $outdir/xgui/hades_sram_v1_1.tcl] {
+foreach f [concat [list $ifdir/hades_sram.xml $ifdir/hades_sram_rtl.xml \
+                $outdir/xgui/hades_sram_v1_1.tcl] $packaged_doc_files $generator_payload] {
   if {![file exists $f]} { puts "HADES-IP FAIL: missing payload $f"; exit 1 }
 }
 
